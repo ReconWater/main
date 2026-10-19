@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import { ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, ImageIcon, Info, Minus, Plus, ShieldCheck, ShoppingBag, X, ZoomIn } from 'lucide-react';
 import { configured, money } from './supabase';
 import { RECON_PRODUCT_MEDIA } from './productMedia';
@@ -15,7 +15,7 @@ function ProductArtwork({product,view,VialVisual,lightbox=false}) {
   const isPhoto=Boolean(view.src);
   const [badImage,setBadImage]=useState(false);
   useEffect(()=>setBadImage(false),[view.src]);
-  if (isPhoto && !badImage) return <img className="rw-p2-product-image" src={view.src} loading={lightbox?'eager':'lazy'} decoding="async" alt={`${product.name} — ${view.label}; photograph supplied by Recon Water`} onError={()=>setBadImage(true)}/>;
+  if (isPhoto && !badImage) return <img className="rw-p2-product-image" src={view.src} loading={lightbox?'eager':'lazy'} decoding="async" fetchPriority={lightbox?'high':'low'} alt={`${product.name} — ${view.label}; photograph supplied by Recon Water`} onError={()=>setBadImage(true)}/>;
   if (view.id==='detail') return <div className="rw-p2-facts-art" aria-label="Product information illustration">
     <span className="rw-p2-facts-mark">RW / PRODUCT REFERENCE</span>
     <FileText size={46} strokeWidth={1.2}/>
@@ -41,6 +41,8 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
   const [active,setActive]=useState(0);
   const [quantity,setQuantity]=useState(1);
   const [zoomOpen,setZoomOpen]=useState(false);
+  const lightboxRef=useRef(null);
+  const lightboxCloseRef=useRef(null);
   const isHospira30=product.volume_ml===30 && /bacteriostatic/i.test(product.name);
   const gallery=useMemo(()=>GALLERY.map(v=>({...v,src:isHospira30 ? RECON_PRODUCT_MEDIA[v.source] : ''})),[isHospira30]);
   const current=gallery[active];
@@ -52,7 +54,29 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
   const status = !hasStock ? 'Unavailable' : !hasPrice ? 'Pricing pending' : remaining===0 ? 'Limit in cart' : 'Available for request';
   const isLow = hasStock && (product.stock_quantity||0)<=product.low_stock_threshold;
   useEffect(()=>{setActive(0);setQuantity(1);setZoomOpen(false);},[product.id]);
-  useEffect(()=>{if(!zoomOpen)return;const onKey=e=>{if(e.key==='Escape')setZoomOpen(false);if(e.key==='ArrowRight')setActive(i=>(i+1)%gallery.length);if(e.key==='ArrowLeft')setActive(i=>(i+gallery.length-1)%gallery.length);};document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey);},[zoomOpen,gallery.length]);
+  // The enlarged gallery behaves like a modal: restore focus, prevent background
+  // scrolling on mobile, and keep keyboard users inside the dialog.
+  useEffect(()=>{
+    if(!zoomOpen)return;
+    const previousFocus=document.activeElement;
+    const previousOverflow=document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    lightboxCloseRef.current?.focus();
+    const onKey=e=>{
+      if(e.key==='Escape'){e.preventDefault();setZoomOpen(false);return;}
+      if(e.key==='ArrowRight')setActive(i=>(i+1)%gallery.length);
+      if(e.key==='ArrowLeft')setActive(i=>(i+gallery.length-1)%gallery.length);
+      if(e.key==='Tab'){
+        const buttons=Array.from(lightboxRef.current?.querySelectorAll('button:not([disabled])')||[]);
+        if(!buttons.length)return;
+        const first=buttons[0],last=buttons[buttons.length-1];
+        if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+        else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+      }
+    };
+    document.addEventListener('keydown',onKey);
+    return()=>{document.removeEventListener('keydown',onKey);document.body.style.overflow=previousOverflow;previousFocus?.focus?.();};
+  },[zoomOpen,gallery.length]);
   return <article className="rw-p2-shell" aria-labelledby={`rw-p2-name-${product.id}`}>
     <div className="rw-p2-gallery">
       <div className="rw-p2-gallery-top"><span>RECON WATER / {String(index+1).padStart(2,'0')}</span><span>{product.volume_ml ? `${product.volume_ml} ML`:'PRODUCT'} · CAD</span></div>
@@ -62,7 +86,7 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
       </button>
       <div className="rw-p2-gallery-controls"><div className="rw-p2-thumbnails" role="group" aria-label="Product gallery">
         {gallery.map((view,i)=><button type="button" className={`rw-p2-thumb ${active===i?'is-selected':''}`} onClick={()=>setActive(i)} aria-pressed={active===i} aria-label={`Show ${view.label}`} key={view.id}>
-          <span>{view.src ? <img src={view.src} alt="" loading="lazy"/> : view.id==='detail' ? <FileText size={21}/> : <ImageIcon size={21}/>}</span><small>{view.label}</small>
+          <span>{view.src ? <img src={view.src} alt="" loading="lazy" decoding="async" fetchPriority="low"/> : view.id==='detail' ? <FileText size={21}/> : <ImageIcon size={21}/>}</span><small>{view.label}</small>
         </button>)}
       </div><span className="rw-p2-view-counter">{String(active+1).padStart(2,'0')} / 03</span></div>
       <p className="rw-p2-photo-note"><Info size={14}/>{gallery.some(v=>v.src)?'Photos supplied by the operator; verify imagery against actual stock.':'Gallery contains concept artwork until verified product photographs are added.'}</p>
@@ -81,8 +105,8 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
       <div className="rw-p2-info-list"><div><span><Check size={16}/> Prices in Canadian dollars</span><span><Check size={16}/> Ontario-based operation</span></div><div><span><Check size={16}/> Manual fulfillment review</span><span><Check size={16}/> Account request history</span></div></div>
       <a className="rw-p2-manufacturer" href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noreferrer noopener">Manufacturer product information <ArrowUpRight size={15}/></a>
     </div>
-    {zoomOpen&&<div className="rw-p2-lightbox" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setZoomOpen(false);}}><div className="rw-p2-lightbox-panel" role="dialog" aria-modal="true" aria-label={`${current.label} enlarged`}>
-      <div className="rw-p2-lightbox-header"><strong>{product.name}</strong><button type="button" onClick={()=>setZoomOpen(false)} aria-label="Close enlarged view"><X size={21}/></button></div>
+    {zoomOpen&&<div className="rw-p2-lightbox" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setZoomOpen(false);}}><div ref={lightboxRef} className="rw-p2-lightbox-panel" role="dialog" aria-modal="true" aria-label={`${current.label} enlarged`}>
+      <div className="rw-p2-lightbox-header"><strong>{product.name}</strong><button ref={lightboxCloseRef} type="button" onClick={()=>setZoomOpen(false)} aria-label="Close enlarged view"><X size={21}/></button></div>
       <div className="rw-p2-lightbox-main"><button type="button" className="rw-p2-lightbox-arrow" onClick={()=>setActive(i=>(i+2)%3)} aria-label="Previous image"><ChevronLeft size={22}/></button><div className="rw-p2-lightbox-art"><ProductArtwork product={product} view={current} VialVisual={VialVisual} lightbox/></div><button type="button" className="rw-p2-lightbox-arrow" onClick={()=>setActive(i=>(i+1)%3)} aria-label="Next image"><ChevronRight size={22}/></button></div>
       <span>{current.label} · {active+1} of 3</span>
     </div></div>}
