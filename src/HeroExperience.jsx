@@ -1,62 +1,99 @@
-import React, { useState } from 'react';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Droplet, ShieldCheck, MapPin, ClipboardCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, ArrowUpRight, Check, Droplet, MapPin, Minus, Plus, ShieldCheck, ShoppingBag } from 'lucide-react';
 import { RECON_PRODUCT_MEDIA } from './productMedia';
+import { configured, money } from './supabase';
+import { maxOrderable } from './productQuantity';
 import './hero.css';
 
-const details = [
-  { label: '30 mL', title: '30 mL multi-dose vial', description: 'The featured presentation of Hospira Bacteriostatic Water for Injection USP.' },
-  { label: 'Product', title: 'Bacteriostatic water', description: 'Refer to the verified manufacturer labeling and product information for specifications and directions.' },
-  { label: 'Requests', title: 'Individually reviewed', description: 'Availability and eligibility are reviewed before confirmation. No payment is collected on this site.' },
-];
-
-/** Decorative hero background contains NO package render, text or product claims.
- * Show a product image only when an actual, verified photograph is configured.
- * Interactive tabs are standard React state, accessible to keyboard and screen readers.
+/**
+ * A single-product hero for Hospira Bacteriostatic Water for Injection USP, 30 mL.
+ * Pricing and availability are passed in from the same Supabase product record as
+ * the product detail section. The add action is the existing cart handler.
+ * No generated/fictional manufacturer packaging is displayed.
  */
-export default function HeroExperience({ onExplore, onProcess }) {
-  const [selected, setSelected] = useState(0);
+export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplore, onProcess }) {
+  const [quantity, setQuantity] = useState(1);
   const [imageFailed, setImageFailed] = useState(false);
-  const productPhoto = RECON_PRODUCT_MEDIA.front && !imageFailed;
-  const active = details[selected];
+
+  const hasPrice = Number.isInteger(product?.price_cents) && product.price_cents > 0;
+  const stock = Math.max(0, Number(product?.stock_quantity) || 0);
+  const remaining = product ? maxOrderable(stock, inCartQty) : 0;
+  const available = Boolean(configured && product && hasPrice && remaining > 0);
+  const chosen = Math.min(Math.max(1, quantity), Math.max(1, remaining));
+  const photoAvailable = Boolean(RECON_PRODUCT_MEDIA.front && !imageFailed);
+
+  useEffect(() => { setQuantity(1); setImageFailed(false); }, [product?.id]);
+
+  let status = 'Product not published';
+  if (!configured) status = 'Preview mode';
+  else if (product && stock === 0) status = 'Currently unavailable';
+  else if (product && !hasPrice) status = 'Pricing pending';
+  else if (product && remaining === 0) status = 'Request limit reached';
+  else if (available) status = 'Available for request';
+
+  const addToRequest = () => {
+    if (available) onAdd(product, chosen);
+  };
+
   return (
     <section className="rw-bac-hero" aria-labelledby="rw-bac-title">
       <div className="rw-bac-background" aria-hidden="true" />
       <div className="rw-bac-sheen" aria-hidden="true" />
       <div className="container rw-bac-layout">
         <div className="rw-bac-copy">
-          <span className="rw-bac-eyebrow"><span className="rw-bac-eyebrow-line"/> RECON WATER · ONTARIO, CANADA</span>
-          <h1 id="rw-bac-title"><span>Hospira</span><br/>Bacteriostatic<br/><em>Water.</em></h1>
-          <p className="rw-bac-subtitle">Bacteriostatic Water for Injection USP<br className="rw-bac-desktop-break"/> <strong>30 mL multi-dose vial</strong></p>
-          <p className="rw-bac-intro">A dedicated product information and request experience, based in Ontario.</p>
+          <span className="rw-bac-eyebrow"><span className="rw-bac-eyebrow-line" /> THE PRODUCT · ONTARIO, CANADA</span>
+          <span className="rw-bac-edition"><Droplet size={15} aria-hidden="true" /> HOSPIRA / 30 ML MULTI-DOSE VIAL</span>
+          <h1 id="rw-bac-title">Bacteriostatic<br/><em>Water.</em></h1>
+          <p className="rw-bac-subtitle">Hospira Bacteriostatic Water for Injection USP. <strong>30 mL.</strong></p>
+          <p className="rw-bac-intro">One product, clearly presented. Explore the product details, see published Canadian pricing, and submit a request for individual review.</p>
           <div className="rw-bac-actions">
-            <button className="rw-bac-primary" type="button" onClick={onExplore}>View product details <ArrowUpRight size={18}/></button>
-            <button className="rw-bac-secondary" type="button" onClick={onProcess}>How requests work <ArrowRight size={18}/></button>
+            <button className="rw-bac-primary" type="button" onClick={onExplore}>Explore the product <ArrowUpRight size={18} aria-hidden="true" /></button>
+            <button className="rw-bac-secondary" type="button" onClick={onProcess}>How requests work <ArrowRight size={17} aria-hidden="true" /></button>
           </div>
-          <div className="rw-bac-proofs" aria-label="Business and order information">
-            <span><MapPin size={16}/> Ontario based</span>
-            <span><ShieldCheck size={16}/> Reviewed requests</span>
-            <span><Droplet size={16}/> 30 mL focus</span>
+          <div className="rw-bac-proofs" aria-label="Site information">
+            <span><MapPin size={16} aria-hidden="true" /> Ontario based</span>
+            <span><ShieldCheck size={16} aria-hidden="true" /> Individual request review</span>
           </div>
         </div>
-        <div className="rw-bac-card" aria-label="Hospira bacteriostatic water product highlights">
-          <div className="rw-bac-card-header"><span>PRODUCT NO. 01</span><span className="rw-bac-card-symbol"><Droplet size={19}/></span></div>
+
+        <div className="rw-bac-card" aria-label="Hospira 30 mL product and request information">
+          <div className="rw-bac-card-header">
+            <span>SINGLE PRODUCT / 30 ML</span>
+            <span className="rw-bac-card-symbol"><Droplet size={18} aria-hidden="true" /></span>
+          </div>
           <div className="rw-bac-card-visual">
-            {productPhoto ? <img src={RECON_PRODUCT_MEDIA.front} alt="Actual Hospira 30 mL bacteriostatic water product photograph" decoding="async" loading="eager" fetchPriority="high" onError={()=>setImageFailed(true)}/> : <div className="rw-bac-water-mark" aria-label="30 millilitre presentation; decorative depiction, not product packaging"><span>30</span><small>mL</small></div>}
+            {photoAvailable ? (
+              <img src={RECON_PRODUCT_MEDIA.front} alt="Hospira 30 mL bacteriostatic water vial photographed by Recon Water" decoding="async" loading="eager" fetchPriority="high" onError={() => setImageFailed(true)} />
+            ) : (
+              <div className="rw-bac-water-mark" role="img" aria-label="30 mL presentation; typography, not a photograph of the product">
+                <span>30</span><small>mL</small>
+              </div>
+            )}
           </div>
           <div className="rw-bac-card-identity">
-            <span>HOSPIRA · PRODUCT INFORMATION</span>
-            <strong>Bacteriostatic Water<br/>for Injection USP</strong>
+            <span>HOSPIRA · FOR INJECTION USP</span>
+            <strong>Bacteriostatic Water</strong>
+            <small>30 mL multi-dose vial</small>
           </div>
-          <div className="rw-bac-tabs" role="tablist" aria-label="Product highlights">
-            {details.map((detail,index)=><button key={detail.label} id={`rw-bac-tab-${index}`} role="tab" type="button" aria-selected={selected===index} aria-controls="rw-bac-panel" tabIndex={selected===index?0:-1} className={selected===index?'is-selected':''} onClick={()=>setSelected(index)} onKeyDown={event=>{ if(event.key==='ArrowRight'||event.key==='ArrowLeft'){event.preventDefault(); const next=(selected+(event.key==='ArrowRight'?1:-1)+details.length)%details.length; setSelected(next); document.getElementById(`rw-bac-tab-${next}`)?.focus(); } }}>{detail.label}</button>)}
+          <div className="rw-bac-purchase">
+            <div className="rw-bac-purchase-top">
+              <div className="rw-bac-price"><span>PRICE PER VIAL · CAD</span><strong>{hasPrice ? money(product.price_cents) : 'Price pending'}</strong></div>
+              <div className={`rw-bac-stock ${available ? 'is-available' : 'is-unavailable'}`} role="status"><span className="rw-bac-stock-dot" />{status}</div>
+            </div>
+            <div className="rw-bac-order-row">
+              <div className="rw-bac-qty" role="group" aria-label="Request quantity">
+                <button type="button" aria-label="Decrease quantity" disabled={!available || chosen <= 1} onClick={() => setQuantity(Math.max(1, chosen - 1))}><Minus size={16}/></button>
+                <output aria-label="Selected quantity">{chosen}</output>
+                <button type="button" aria-label="Increase quantity" disabled={!available || chosen >= remaining} onClick={() => setQuantity(Math.min(remaining, chosen + 1))}><Plus size={16}/></button>
+              </div>
+              <button className="rw-bac-add" type="button" disabled={!available} onClick={addToRequest}><ShoppingBag size={18} aria-hidden="true" /> Add to request <ArrowRight size={16} aria-hidden="true" /></button>
+            </div>
+            <p className="rw-bac-request-note"><Check size={15} aria-hidden="true" /> No payment collected online. Requests require approval.</p>
           </div>
-          <div className="rw-bac-tab-panel" id="rw-bac-panel" role="tabpanel" aria-labelledby={`rw-bac-tab-${selected}`} tabIndex={0}>
-            <strong>{active.title}</strong><p>{active.description}</p>
-          </div>
-          {!productPhoto && <span className="rw-bac-photo-note">Illustrative design · no simulated manufacturer packaging</span>}
+          {!photoAvailable && <span className="rw-bac-photo-note">Typographic representation · not manufacturer packaging</span>}
         </div>
       </div>
-      <div className="container rw-bac-foot"><span>ONE PRODUCT. EVERY DETAIL.</span><button type="button" onClick={onExplore}>EXPLORE <ArrowDownRight size={16}/></button></div>
+      <div className="container rw-bac-foot"><span>RECON WATER · INDEPENDENT CANADIAN WEBSITE</span><button type="button" onClick={onExplore}>PRODUCT DETAILS <ArrowRight size={15} aria-hidden="true" /></button></div>
     </section>
   );
 }

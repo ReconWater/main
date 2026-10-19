@@ -117,6 +117,10 @@ export default function App(){
   const inCart=products.filter(p=>cart[p.id]>0);
   const totalCount=inCart.reduce((n,p)=>n+cart[p.id],0);
   const subtotal=inCart.reduce((n,p)=>n+(p.price_cents||0)*cart[p.id],0);
+  // Only the 30 mL bacteriostatic-water listing can supply this single-product hero.
+  // Never attach an unrelated product's price or stock to the Hospira presentation.
+  const heroProduct=products.find(p=>Number(p.volume_ml)===30 && /bacteriostatic|bac water/i.test(p.name)) ||
+    (products.length===1 && Number(products[0].volume_ml)===30 ? products[0] : null);
   const add=(p,requested=1)=>{if(p.price_cents==null || p.stock_quantity<1 || !configured){toast('This item is not ready for ordering.','error');return;}if(maxOrderable(p.stock_quantity,cart[p.id]||0)===0){toast('The available quantity is already in your cart.','error');setCartOpen(true);return;}setCart(c=>({...c,[p.id]:nextCartQuantity(p.stock_quantity,c[p.id]||0,requested)}));setCartOpen(true);};
   const qty=(p,delta)=>setCart(c=>({...c,[p.id]:Math.max(0,Math.min(MAX_REQUEST_UNITS,p.stock_quantity,(c[p.id]||0)+delta))}));
   const beginCheckout=()=>{setCartOpen(false);if(!session){setAuthOpen(true);toast('Sign in or create a verified account before submitting an order request.');return;}setCheckoutOpen(true);};
@@ -127,7 +131,7 @@ export default function App(){
     <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setAuthOpen={setAuthOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
     {!configured&&<div className="setup-banner"><AlertCircle size={16}/> Demo mode — connect Supabase and set environment variables to activate the storefront and admin panel.</div>}
     {route==='shop'?<>
-      <main id="main-content"><HeroExperience onExplore={()=>scrollToSection('products')} onProcess={()=>scrollToSection('how')}/>
+      <main id="main-content"><HeroExperience product={heroProduct} inCartQty={heroProduct ? cart[heroProduct.id]||0 : 0} onAdd={add} onExplore={()=>scrollToSection('products')} onProcess={()=>scrollToSection('how')}/>
       <section className="benefit-row"><div className="container benefit-grid">{[['verified','Review before fulfillment','Every order is reviewed individually.'],['delivery','Canadian requests','Ontario-based operations with Canadian delivery addresses.'],['stock','Inventory controlled','Stock updates after order approval.']].map(([icon,head,body])=><div className="benefit" key={head}><div className="benefit-icon"><SimpleIcon kind={icon}/></div><div><strong>{head}</strong><p>{body}</p></div></div>)}</div></section>
       <section id="products" className="rw-products-section section" aria-labelledby="rw-products-heading"><div className="container">
         <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div><span className="rw-products-counter">{products.length.toString().padStart(2,'0')} / PUBLISHED {products.length===1?'PRODUCT':'PRODUCTS'}</span></div>
