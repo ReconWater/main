@@ -1,157 +1,165 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, Box, Check, CheckCircle2, ChevronDown, CreditCard, Droplets, FileText, HeartPulse, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, UserRound, X, AlertCircle } from 'lucide-react';
-import { supabase, configured, callApi, money } from './supabase';
-import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
-import ProductExperience from './ProductExperience';
-import HeroExperience from './HeroExperience';
-
-// Explicit route boundary: administration and its CSS are not part of the storefront entry bundle.
-const AdminPanel = React.lazy(() => import('./AdminPanel.jsx'));
-import { maxOrderable, nextCartQuantity, MAX_REQUEST_UNITS } from './productQuantity';
-
-const scrollToSection = (id, delay=0) => {
-  const scroll = () => document.getElementById(id)?.scrollIntoView({
-    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-    block: 'start'
-  });
-  if (delay) window.setTimeout(scroll, delay);
-  else scroll();
-};
-
-const previewProducts = [{ id:'preview',sku:'BW-30ML',name:'Bacteriostatic Water for Injection USP',description:'30 mL multiple-dose vial. Availability and eligibility subject to review.',volume_ml:30,price_cents:null,stock_quantity:0,low_stock_threshold:5,is_active:true }];
-const statusLabel = { pending_review:'Pending review', approved:'Approved', fulfilled:'Fulfilled', cancelled:'Cancelled' };
-const date = (d) => new Date(d).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'});
-function VialVisual({large=false}) {
-  return <div className={`vial-art ${large?'vial-art-large':''}`} aria-label="Generic illustration of a bacteriostatic water vial" role="img">
-    <div className="vial-halo"/><div className="vial-shadow"/><div className="vial"><div className="vial-cap"><div className="vial-cap-top"/></div><div className="vial-neck"/><div className="vial-glass"><div className="vial-glint"/><div className="vial-label"><span className="vial-label-top">STERILE PREPARATION</span><strong>BACTERIOSTATIC<br/>WATER</strong><span>FOR INJECTION · USP</span><span className="vial-ml">30 mL</span></div><div className="vial-liquid"/></div></div>
-    <span className="art-deco art-deco-a"/><span className="art-deco art-deco-b"/>
-  </div>;
+import React,{useCallback,useEffect,useMemo,useState} from 'react';
+import {Activity,ArrowRight,ArrowUpRight,Check,ChevronDown,ClipboardCheck,ClipboardList,Droplet,FileText,Info,Lock,LogOut,Menu,Minus,Package,PackageCheck,Plus,ShieldCheck,ShoppingBag,Truck,UserRound,X} from 'lucide-react';
+import {supabase,configured,callApi,money} from './supabase';
+import {CANADIAN_PROVINCES,formatCanadianPostal} from './canada';
+import {RECON_PRODUCT_MEDIA} from './productMedia';
+import {vialCount,formatAvailability,isRequestable} from './packaging';
+const AdminPanel=React.lazy(()=>import('./AdminPanel.jsx'));
+const toSection=id=>document.getElementById(id)?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+const date=d=>new Date(d).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'});
+const statusLabels={pending_review:'Pending review',approved:'Approved / reserved',fulfilled:'Fulfilled',cancelled:'Cancelled'};
+const getAvailable=p=>Math.max(0,Number(p?.available_packages)||0);
+const cartCountVials=vialCount;
+function Brand(){return <span className="brand"><span className="brand-logo"><Droplet size={24} strokeWidth={1.65}/></span><span className="brand-words"><strong>RECON<span>WATER</span></strong><small>ONTARIO · CANADA</small></span></span>}
+function Notice({message,clear}){return message?<div className={`notice ${message.error?'is-error':''}`} role="status"><span>{message.text}</span><button aria-label="Dismiss message" onClick={clear}><X size={17}/></button></div>:null}
+function Field({label,children}){return <label className="form-field"><span>{label}</span>{children}</label>}
+function ProductVisual({mode='hero'}){
+ const photos=[['front',RECON_PRODUCT_MEDIA.front],['angle',RECON_PRODUCT_MEDIA.angle],['detail',RECON_PRODUCT_MEDIA.detail]].filter(([,url])=>Boolean(url));
+ const [photoIndex,setPhotoIndex]=useState(0),[broken,setBroken]=useState(false);
+ useEffect(()=>{setPhotoIndex(0);setBroken(false)},[mode]);
+ const chosen=photos[photoIndex];
+ return <div className={`product-stage product-stage-${mode}`}>
+   <span className="stage-corner stage-corner-tl"/><span className="stage-corner stage-corner-br"/>
+   {chosen&&!broken?<img src={chosen[1]} alt={`Verified Hospira 30 mL bacteriostatic water product photograph — ${chosen[0]} view`} decoding="async" loading={mode==='hero'?'eager':'lazy'} fetchPriority={mode==='hero'?'high':'auto'} onError={()=>setBroken(true)}/>:
+   <div className="product-placeholder"><span className="placeholder-label">PRODUCT IDENTIFICATION</span><Droplet size={77} strokeWidth={0.9}/><span className="placeholder-volume">30<span>mL</span></span><span className="placeholder-caption">BACTERIOSTATIC WATER FOR INJECTION USP</span><small>Verified product photography to be added</small></div>}
+   <span className="stage-stamp">RW / PRODUCT 001</span>
+   {photos.length>1&&<div className="photo-navigation" role="group" aria-label="Verified product image views">{photos.map(([label],i)=><button type="button" key={label} aria-pressed={photoIndex===i} onClick={()=>{setBroken(false);setPhotoIndex(i)}}>{label}</button>)}</div>}
+ </div>;
 }
-function BrandWordmark({ inverse = false }) {
-  return <span className={`rw-brand ${inverse ? 'rw-brand-inverse' : ''}`}>
-    <span className="rw-brand-symbol" aria-hidden="true"><Droplets size={23} strokeWidth={1.7}/></span>
-    <span className="rw-brand-type"><strong>recon<span>water</span><span className="rw-brand-period">.</span></strong><small>ONTARIO · CANADA</small></span>
-  </span>;
-}
-
-function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOrders, setOrdersOpen, setCartOpen, totalCount}) {
-  const goToSection = (id) => {
-    if (route !== 'shop') navigate('shop');
-    else setMobileOpen(false);
-    scrollToSection(id, route === 'shop' ? 0 : 75);
-  };
-  return <>
-    <div className="rw-topbar"><div className="container rw-topbar-inner">
-      <span><span className="rw-topbar-dot"/> INDEPENDENT · ONTARIO BASED</span>
-    </div></div>
-    <header className="rw-header"><div className="container rw-header-inner">
-      <button type="button" className="rw-home" onClick={()=>navigate('shop')} aria-label="Recon Water homepage"><BrandWordmark/></button>
-      <nav id="rw-navigation" className={`rw-navigation ${mobileOpen ? 'rw-navigation-open' : ''}`} aria-label="Primary navigation">
-        <button type="button" className={route==='shop'?'rw-nav-active':''} onClick={()=>goToSection('products')}>The product</button>
-      </nav>
-      <div className="rw-header-actions">
-        {session && <button className="rw-account" type="button" onClick={()=>{loadOrders();setOrdersOpen(true);}}><UserRound size={17}/><span>My requests</span></button>}
-        <button className="rw-cart" type="button" aria-label={`Open cart${totalCount ? `, ${totalCount} items` : ''}`} onClick={()=>setCartOpen(true)}><ShoppingBag size={18}/>{totalCount>0&&<em>{totalCount}</em>}</button>
-        <button type="button" className="rw-menu-button" aria-controls="rw-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen?'Close navigation':'Open navigation'} onClick={()=>setMobileOpen(!mobileOpen)}>{mobileOpen?<X size={21}/>:<Menu size={21}/>}</button>
+function Badge({good,children}){return <span className={`stock-indicator ${good?'stock-good':'stock-off'}`}><i/>{children}</span>}
+function MainShop({product,packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd}){
+ const chosen=packages.find(p=>p.id===selected)||packages[0];
+ const {remaining}=formatAvailability(chosen,cart,stock);
+ const effectiveQty=Math.min(Math.max(1,packQty),Math.max(1,remaining));
+ const available=isRequestable(chosen,{remaining});
+ const sub=chosen?money(chosen.price_cents):'Pricing pending';
+ const perVial=chosen?.price_cents?money(Math.round(chosen.price_cents/chosen.vials_per_pack)):'—';
+ return <main id="main-content">
+  <section id="product" className="product-hero"><div className="container">
+   <div className="breadcrumb"><span>RECON WATER</span><span className="crumb-divider">/</span><strong>PRODUCT 001</strong></div>
+   <div className="hero-grid">
+    <div className="hero-image-wrap"><ProductVisual/><div className="stage-footnote"><span><ShieldCheck size={15}/> Product imagery subject to verification</span><span>30 mL / INJECTION USP</span></div></div>
+    <div className="hero-information"><div className="micro-heading"><i/> HOSPIRA / PFIZER CANADA</div>
+      <h1>Bacteriostatic Water<br/><span>for Injection USP.</span></h1>
+      <p className="hero-subtitle">30 mL multi-dose vial <span>·</span> DIN 00038202</p>
+      <p className="hero-description">One product. Three precise packaging formats. Product information, availability, and CAD pricing in one clear place.</p>
+      <div className="spec-stripe"><div><small>FORMAT</small><strong>30 mL</strong></div><div><small>MANUFACTURER</small><strong>Hospira / Pfizer</strong></div><div><small>REGION</small><strong>Ontario, Canada</strong></div></div>
+      <div className="selection-head"><div><span>01 / SELECT PACKAGE</span><p>Select your preferred format</p></div><span className="subtle-badge">ONE PRODUCT</span></div>
+      <div className="format-grid" role="radiogroup" aria-label="Package format">
+      {packages.length?packages.map(p=><button type="button" key={p.id} role="radio" aria-checked={chosen?.id===p.id} className={`format-option ${chosen?.id===p.id?'is-selected':''}`} onClick={()=>{setSelected(p.id);setPackQty(1)}}>
+       <span className="format-top"><span>{p.code==='single'?'SINGLE':p.code==='ten'?'BUNDLE':'FACTORY SEALED'}</span>{chosen?.id===p.id&&<Check size={16}/>}</span>
+       <strong>{p.vials_per_pack}<small>{p.vials_per_pack===1?'vial':'vials'}</small></strong><span className="format-price">{money(p.price_cents)}</span>
+       <span className="format-sub">{p.code==='case'?'Original 25-vial case':p.code==='ten'?'Assembled 10-vial bundle':'Individual vial'}</span>
+      </button>):<div className="format-empty">Package pricing is being configured. No ordering is available yet.</div>}
       </div>
-    </div></header>
-  </>;
+      {chosen&&<div className="purchase-box">
+        <div className="purchase-pricing"><div><span>SELECTED PACKAGE · CAD</span><strong>{sub}</strong><small>{chosen.vials_per_pack} × 30 mL · {perVial} per vial equivalent</small></div>
+        <Badge good={available}>{!chosen.active?'Requests disabled':!chosen.price_cents?'Pricing pending':getAvailable(chosen)===0?'Currently unavailable':remaining===0?'Request limit reached':'Available for review'}</Badge></div>
+        <div className="purchase-controls"><div className="stepper" role="group" aria-label="Number of selected packages"><button aria-label="Decrease packages" type="button" disabled={!available||effectiveQty<=1} onClick={()=>setPackQty(Math.max(1,effectiveQty-1))}><Minus size={17}/></button><output aria-label="Package quantity">{effectiveQty}</output><button aria-label="Increase packages" type="button" disabled={!available||effectiveQty>=remaining} onClick={()=>setPackQty(Math.min(remaining,effectiveQty+1))}><Plus size={17}/></button></div>
+         <button className="primary-button purchase-cta" disabled={!available} type="button" onClick={()=>onAdd(chosen,effectiveQty)}><ShoppingBag size={18}/> Add to request <ArrowRight size={19}/></button></div>
+        <p className="purchase-note"><ShieldCheck size={15}/> Requests are reviewed individually. No payment is collected or inventory reserved at submission.</p>
+      </div>}
+      <div className="hero-endnotes"><span><ClipboardCheck size={16}/> Reviewed requests</span><span><PackageCheck size={16}/> Lot-managed inventory</span></div>
+    </div>
+   </div>
+  </div></section>
+  <div className="credibility-strip"><div className="container credibility-inner"><span><PackageCheck size={19}/> Lot-tracked availability</span><span><ShieldCheck size={19}/> Admin-reviewed requests</span><span><Truck size={19}/> Canadian address validation</span></div></div>
+  <section id="details" className="content-section"><div className="container section-columns"><div className="section-intro"><span className="section-eyebrow">02 / PRODUCT DETAILS</span><h2>Designed around<br/>the essentials.</h2><p>Accurate packaging descriptions, transparent ordering terms and manufacturer information — without unnecessary claims.</p></div><div className="detail-panel">
+    <div className="detail-row"><span>Product</span><strong>Bacteriostatic Water for Injection USP</strong></div>
+    <div className="detail-row"><span>Brand / manufacturer</span><strong>Hospira / Pfizer Canada ULC</strong></div>
+    <div className="detail-row"><span>Volume</span><strong>30 mL per vial</strong></div>
+    <div className="detail-row"><span>Canadian DIN</span><strong>00038202 — verify against supplied label</strong></div>
+    <div className="detail-row"><span>Packaging</span><strong>1 vial, assembled 10-vial bundle, or factory-sealed 25-vial case</strong></div>
+    <div className="detail-row"><span>Pricing</span><strong>Canadian dollars (CAD)</strong></div>
+    <div className="detail-row"><span>Order status</span><strong>Subject to eligibility, availability and fulfillment review</strong></div>
+  </div></div></section>
+  <section id="process" className="content-section section-muted"><div className="container"><span className="section-eyebrow">03 / PROCESS</span><div className="process-title"><h2>A straightforward<br/>request process.</h2><p>Each request is considered individually. Submission is not a confirmed sale, payment or stock reservation.</p></div><div className="process-grid">{[
+    ['01','Select packaging','Choose an individual vial, an assembled 10-vial bundle, or a factory-sealed case.'],
+    ['02','Submit a request','Sign in and enter a Canadian delivery address. No payment is collected.'],
+    ['03','Review & confirmation','An administrator checks eligibility and physical lot availability before approval.'],
+    ['04','Track the outcome','Sign in to review request status and any subsequent fulfillment updates.']
+   ].map(([num,title,body])=><div className="process-card" key={num}><span>{num}</span><h3>{title}</h3><p>{body}</p></div>)}</div></div></section>
+  <section id="faq" className="content-section"><div className="container section-columns"><div className="section-intro"><span className="section-eyebrow">04 / INFORMATION</span><h2>Clear answers.<br/>No ambiguity.</h2><p>Important details about packages and the request process.</p></div><div className="faq-stack">
+   {[
+    ['What is included in the 10-vial option?','Ten individual 30 mL vials assembled as a bundle. It is not represented as original manufacturer 10-vial packaging.'],
+    ['Is the full case factory sealed?','Yes. The 25-vial case format is reserved for unopened manufacturer-sealed cases, tracked separately from loose inventory.'],
+    ['When is inventory reserved?','A submitted request does not reserve stock. Stock is reserved against eligible lots only after administrator approval.'],
+    ['Can I pay online?','No. The website currently accepts review requests and does not collect online payment.'],
+    ['Are orders available anywhere in Canada?','Canadian delivery information may be entered for review. Actual eligibility, shipping and fulfillment depend on the applicable requirements and administrator approval.']
+   ].map(([q,a])=><details key={q}><summary>{q}<ChevronDown size={18}/></summary><p>{a}</p></details>)}
+  </div></div></section>
+  <section className="disclaimer"><div className="container"><Info size={20}/><p>Recon Water is an independent Ontario-based site and is not represented as an official Pfizer or Hospira website. Product identity, labeling, eligibility and all regulatory requirements must be verified before fulfillment. Manufacturer instructions and the product label remain authoritative.</p></div></section>
+ </main>;
 }
 
-function SiteFooter({navigate}) {
-  return <footer className="rw-footer"><div className="container rw-footer-inner">
-    <div className="rw-footer-intro"><BrandWordmark inverse/><p>Clarity in every detail. An independent product information and request portal based in Ontario, Canada.</p></div>
-    <div className="rw-footer-col"><h3>Explore</h3><button onClick={()=>{navigate('shop');scrollToSection('products',75);}}>Product information <ArrowUpRight size={13}/></button><button onClick={()=>navigate('admin')}>Administration <ArrowUpRight size={13}/></button></div>
-    <div className="rw-footer-col"><h3>Product context</h3><p>CAD pricing, Canadian addresses, and individual request review. No online payment is collected through this site.</p><a href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noopener noreferrer">Manufacturer information <ArrowUpRight size={13}/></a></div>
-  </div><div className="container rw-footer-bottom"><span>© {new Date().getFullYear()} Recon Water. Ontario, Canada.</span><span>Independent site · Not affiliated with or endorsed by Hospira or Pfizer.</span></div></footer>;
-}
-
-function Notice({message,onClose}) { return message ? <div className={`toast ${message.type==='error'?'toast-error':''}`} role="status"><span>{message.type==='error'?<AlertCircle size={19}/>:<CheckCircle2 size={19}/>}</span><span>{message.text}</span><button className="icon-button" aria-label="Dismiss notice" onClick={onClose}><X size={16}/></button></div> : null; }
-function Field({label,children,hint}) { return <label className="field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>; }
-function Pill({children,type='neutral'}) {return <span className={`pill pill-${type}`}>{children}</span>;}
 export default function App(){
-  const [route,setRoute] = useState(window.location.pathname.startsWith('/admin')?'admin':'shop');
-  const [products,setProducts]=useState(configured?[]:previewProducts);
-  const [session,setSession]=useState(null);
-  const [authOpen,setAuthOpen]=useState(false);
-  const [cartOpen,setCartOpen]=useState(false);
-  const [checkoutOpen,setCheckoutOpen]=useState(false);
-  const [notice,setNotice]=useState(null);
-  const [cart,setCart]=useState({});
-  const [loading,setLoading]=useState(false);
-  const [mobileOpen,setMobileOpen]=useState(false);
-  const [myOrders,setMyOrders]=useState([]);
-  const [ordersOpen,setOrdersOpen]=useState(false);
-  const toast = (text,type='success')=>setNotice({text,type});
-  const navigate = (to)=>{ const url=to==='admin'?'/admin':'/'; window.history.pushState({},'',url); setRoute(to);setMobileOpen(false);window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}); };
-  useEffect(()=>{const change=()=>setRoute(window.location.pathname.startsWith('/admin')?'admin':'shop');window.addEventListener('popstate',change);return()=>window.removeEventListener('popstate',change);},[]);
-  useEffect(()=>{
-    if (!mobileOpen) return;
-    const onKey = event => { if (event.key === 'Escape') setMobileOpen(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  },[mobileOpen]);
-  const loadProducts=useCallback(async()=>{
-    if(!supabase) return;
-    const {data,error}=await supabase.from('products').select('id,sku,name,description,volume_ml,price_cents,stock_quantity,low_stock_threshold,is_active').eq('is_active',true).order('name');
-    if(error) toast('Cannot retrieve products. Check Supabase setup.','error');
-    else setProducts(data||[]);
-  },[]);
-  useEffect(()=>{loadProducts();if(!supabase)return;supabase.auth.getSession().then(({data})=>setSession(data.session));const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,s)=>setSession(s));return()=>subscription.unsubscribe();},[loadProducts]);
-  const loadOrders=async()=>{if(!supabase)return;const {data,error}=await supabase.from('orders').select('id,order_number,created_at,status,subtotal_cents,order_items(product_name,quantity)').order('created_at',{ascending:false}).limit(25);if(error)toast('Could not retrieve order history','error');else setMyOrders(data||[]);};
-  const inCart=products.filter(p=>cart[p.id]>0);
-  const totalCount=inCart.reduce((n,p)=>n+cart[p.id],0);
-  const subtotal=inCart.reduce((n,p)=>n+(p.price_cents||0)*cart[p.id],0);
-  // Only the 30 mL bacteriostatic-water listing can supply this single-product hero.
-  // Never attach an unrelated product's price or stock to the Hospira presentation.
-  const heroProduct=products.find(p=>Number(p.volume_ml)===30 && /bacteriostatic|bac water/i.test(p.name)) ||
-    (products.length===1 && Number(products[0].volume_ml)===30 ? products[0] : null);
-  const add=(p,requested=1)=>{if(p.price_cents==null || p.stock_quantity<1 || !configured){toast('This item is not ready for ordering.','error');return;}if(maxOrderable(p.stock_quantity,cart[p.id]||0)===0){toast('The available quantity is already in your cart.','error');setCartOpen(true);return;}setCart(c=>({...c,[p.id]:nextCartQuantity(p.stock_quantity,c[p.id]||0,requested)}));setCartOpen(true);};
-  const qty=(p,delta)=>setCart(c=>({...c,[p.id]:Math.max(0,Math.min(MAX_REQUEST_UNITS,p.stock_quantity,(c[p.id]||0)+delta))}));
-  const beginCheckout=()=>{setCartOpen(false);if(!session){setAuthOpen(true);toast('Sign in or create a verified account before submitting an order request.');return;}setCheckoutOpen(true);};
-  const logout=async()=>{await supabase?.auth.signOut();setCart({});setMyOrders([]);toast('Signed out');};
-  const refreshAfterOrder=()=>{setCart({});setCheckoutOpen(false);loadOrders();loadProducts();};
-  return <>
-    <a className="rw-skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
-    {!configured&&<div className="setup-banner"><AlertCircle size={16}/> Demo mode — connect Supabase and set environment variables to activate the storefront and admin panel.</div>}
-    {route==='shop'?<>
-      <main id="main-content"><HeroExperience product={heroProduct} inCartQty={heroProduct ? cart[heroProduct.id]||0 : 0} onAdd={add} onExplore={()=>scrollToSection('products')}/>
-      <section id="products" className="rw-products-section" aria-labelledby="rw-products-heading"><div className="container">
-        <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div></div>
-        {products.length===0 ? <div className="empty"><Box size={36}/><h3>No published products</h3><p>Publish a product in the admin panel to make it visible here.</p></div> : <div className="rw-experience-list">{products.slice().sort((a,b)=>Number(b.volume_ml===30 && /bacteriostatic/i.test(b.name))-Number(a.volume_ml===30 && /bacteriostatic/i.test(a.name))).map(p=><ProductExperience key={p.id} product={p} inCartQty={cart[p.id]||0} onAdd={add} VialVisual={VialVisual}/>)}</div>}
-        <div className="rw-product-disclaimer"><ShieldCheck size={19}/><p>Product details are provided for identification, not medical guidance. Price and availability do not establish eligibility for purchase. Request submission is not an order confirmation or payment. Supply and fulfillment must meet applicable Canadian laws.</p></div>
-      </div></section>
-      </main>
-    </>:<React.Suspense fallback={<main id="main-content" className="rw-route-loading" role="status">Loading administration…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={toast} onSignOut={logout} reloadPublic={loadProducts}/></React.Suspense>}
-    <SiteFooter navigate={navigate}/>
-    <Notice message={notice} onClose={()=>setNotice(null)}/>
-    {cartOpen&&<div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setCartOpen(false)}}><div className="drawer"><div className="drawer-head"><div><small>YOUR SELECTION</small><h2>Order cart <span>({totalCount})</span></h2></div><button className="round-close" onClick={()=>setCartOpen(false)}><X/></button></div><div className="drawer-content">{inCart.length===0?<div className="empty-cart"><ShoppingBag size={42}/><h3>Your cart is empty</h3><p>Add an available product to begin.</p><button className="btn btn-primary" onClick={()=>setCartOpen(false)}>Continue browsing</button></div>:inCart.map(p=><div className="cart-item" key={p.id}><div className="cart-thumbnail"><Droplets size={28}/></div><div className="cart-details"><strong>{p.name}</strong><small>{p.volume_ml} mL · {money(p.price_cents)}</small><div className="qty-controls"><button aria-label="Decrease quantity" onClick={()=>qty(p,-1)}><Minus size={15}/></button><span>{cart[p.id]}</span><button aria-label="Increase quantity" onClick={()=>qty(p,1)}><Plus size={15}/></button></div></div><strong>{money(p.price_cents*cart[p.id])}</strong></div>)}</div>{totalCount>0&&<div className="drawer-bottom"><div className="total-row"><span>Estimated subtotal</span><strong>{money(subtotal)}</strong></div><p>All prices in CAD. Applicable taxes, domestic delivery charges, eligibility, and fulfillment are reviewed separately. No payment is collected.</p><button className="btn btn-primary btn-block" onClick={beginCheckout}>Continue to request <ArrowRight size={17}/></button></div>}</div></div>}
-    {authOpen&&<AuthModal close={()=>setAuthOpen(false)} toast={toast} session={session}/>}
-    {checkoutOpen&&<CheckoutModal close={()=>setCheckoutOpen(false)} cartItems={inCart.map(p=>({product_id:p.id,quantity:cart[p.id]}))} subtotal={subtotal} session={session} toast={toast} finished={refreshAfterOrder}/>}
-    {ordersOpen&&<div className="overlay overlay-center" onMouseDown={e=>{if(e.target===e.currentTarget)setOrdersOpen(false)}}><div className="modal myorders-modal"><button className="round-close modal-x" onClick={()=>setOrdersOpen(false)}><X/></button><div className="eyebrow subtle">YOUR ACCOUNT</div><h2>Order requests</h2><p className="muted">Order requests are not payment confirmations.</p>{myOrders.length?myOrders.map(o=><div className="my-order" key={o.id}><div><strong>{o.order_number}</strong><small>{date(o.created_at)} · {o.order_items.map(i=>`${i.quantity} × ${i.product_name}`).join(', ')}</small></div><div><Pill type={o.status==='approved'?'available':o.status==='cancelled'?'muted':'neutral'}>{statusLabel[o.status]}</Pill><strong>{money(o.subtotal_cents)}</strong></div></div>):<div className="empty"><Package size={28}/><p>You have no order requests yet.</p></div>}<button className="btn btn-outline btn-block" onClick={()=>{setOrdersOpen(false);logout();}}><LogOut size={16}/> Sign out</button></div></div>}
-  </>;
+ const [route,setRoute]=useState(location.pathname.startsWith('/admin')?'admin':'shop');
+ const [menu,setMenu]=useState(false),[authOpen,setAuthOpen]=useState(false),[recoveryOpen,setRecoveryOpen]=useState(false),[cartOpen,setCartOpen]=useState(false),[checkout,setCheckout]=useState(false),[ordersOpen,setOrdersOpen]=useState(false);
+ const [session,setSession]=useState(null),[product,setProduct]=useState(null),[packages,setPackages]=useState([]),[stock,setStock]=useState({loose:0,sealed:0}),[selected,setSelected]=useState(null),[packQty,setPackQty]=useState(1);
+ const [cart,setCart]=useState([]),[message,setMessage]=useState(null),[orders,setOrders]=useState([]);
+ const alert=(text,error=false)=>setMessage({text,error});
+ const navigate=to=>{history.pushState({},'',to==='admin'?'/admin':'/');setRoute(to);setMenu(false);window.scrollTo(0,0);};
+ useEffect(()=>{const pop=()=>setRoute(location.pathname.startsWith('/admin')?'admin':'shop');window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[]);
+ const refresh=useCallback(async()=>{
+  try{const res=await fetch('/.netlify/functions/api?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
+    setProduct(data.product);setPackages(data.packages||[]);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
+  }catch(e){alert(e.message,true)}
+ },[]);
+ useEffect(()=>{refresh();if(!supabase)return;supabase.auth.getSession().then(({data})=>setSession(data.session));const {data:{subscription}}=supabase.auth.onAuthStateChange((event,s)=>{setSession(s);if(event==='PASSWORD_RECOVERY')setRecoveryOpen(true)});return()=>subscription.unsubscribe()},[refresh]);
+ const liveCart=useMemo(()=>cart.map(l=>{const p=packages.find(x=>x.id===l.package_id);return p?{...p,quantity:l.quantity}:null}).filter(Boolean),[cart,packages]);
+ const subtotal=liveCart.reduce((n,p)=>n+(p.price_cents||0)*p.quantity,0);
+ const add=(p,n)=>{
+   const {remaining,inCart}=formatAvailability(p,cart,stock);
+   if(!isRequestable(p,{remaining})){alert('Selected format is not available for this request.',true);return;}
+   const amount=Math.min(remaining,Math.max(1,n));
+   setCart(c=>[...c.filter(x=>x.package_id!==p.id),{package_id:p.id,quantity:inCart+amount,stock_kind:p.stock_kind,vials_per_pack:p.vials_per_pack}]);
+   setCartOpen(true);
+ };
+ const adjust=(p,delta)=>setCart(c=>{
+   const current=c.find(x=>x.package_id===p.id)?.quantity||0;
+   if(delta<0){const n=current-1;return [...c.filter(x=>x.package_id!==p.id),...(n>0?[{package_id:p.id,quantity:n,stock_kind:p.stock_kind,vials_per_pack:p.vials_per_pack}]:[])];}
+   const {remaining}=formatAvailability(p,c,stock);
+   if(remaining<=0) return c;
+   return [...c.filter(x=>x.package_id!==p.id),{package_id:p.id,quantity:current+1,stock_kind:p.stock_kind,vials_per_pack:p.vials_per_pack}];
+ });
+ const begin=()=>{setCartOpen(false);if(!session){setAuthOpen(true);alert('Please sign in with a verified account to submit a request.');return}setCheckout(true)};
+ const loadOrders=async()=>{if(!supabase)return;const {data,error}=await supabase.from('orders').select('id,order_number,created_at,status,subtotal_cents,order_items(product_name,sku,quantity,package_label,vials_per_pack)').order('created_at',{ascending:false}).limit(40);if(error)alert('Could not retrieve request history.',true);else setOrders(data||[])};
+ const signOut=async()=>{await supabase?.auth.signOut();setCart([]);setOrders([]);alert('Signed out successfully')};
+ const navClick=id=>{if(route==='admin'){navigate('shop');setTimeout(()=>toSection(id),90)}else toSection(id);setMenu(false)};
+ return <>
+  <div className="topbar"><div className="container topbar-inner"><span><span className="topbar-mark"/> INDEPENDENT PRODUCT SUPPLY · ONTARIO, CANADA</span><span>REQUESTS SUBJECT TO REVIEW</span></div></div>
+  <header className="site-header"><div className="container header-row"><button className="brand-button" onClick={()=>navigate('shop')} aria-label="Recon Water home"><Brand/></button>
+   <nav className={menu?'nav-links nav-open':'nav-links'} aria-label="Primary navigation"><button onClick={()=>navClick('product')}>The product</button><button onClick={()=>navClick('details')}>Specifications</button><button onClick={()=>navClick('process')}>Process</button><button onClick={()=>navClick('faq')}>FAQ</button></nav>
+   <div className="header-tools"><button className="text-tool" onClick={()=>session?(loadOrders(),setOrdersOpen(true)):setAuthOpen(true)}><UserRound size={19}/><span>{session?'My requests':'Account'}</span></button><button className="cart-trigger" aria-label="Open request cart" onClick={()=>setCartOpen(true)}><ShoppingBag size={19}/><span>{cart.reduce((n,i)=>n+i.quantity,0)}</span></button><button className="mobile-trigger" aria-expanded={menu} aria-label="Toggle navigation" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></div>
+  </div></header>
+  {route==='shop'?<MainShop product={product} packages={packages} stock={stock} selected={selected} setSelected={setSelected} packQty={packQty} setPackQty={setPackQty} cart={cart} onAdd={add}/>:<React.Suspense fallback={<main className="loading-admin">Loading administrator workspace…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={alert} onSignOut={signOut} reloadPublic={refresh}/></React.Suspense>}
+  <footer className="site-footer"><div className="container footer-content"><div><Brand/><p>Independent Canadian product information and request management. Ontario based.</p></div><div><strong>PRODUCT</strong><button onClick={()=>navClick('product')}>Hospira 30 mL</button><button onClick={()=>navClick('details')}>Specifications</button><button onClick={()=>navClick('faq')}>Questions</button></div><div><strong>INFORMATION</strong><button onClick={()=>navClick('process')}>Review process</button><span>Privacy, terms and contact policies: pending operator review</span></div></div><div className="container footer-base"><span>© {new Date().getFullYear()} Recon Water · Independent operator</span><span>Ontario, Canada · Pricing in CAD · No payment collected online</span></div></footer>
+  <Notice message={message} clear={()=>setMessage(null)}/>
+  {cartOpen&&<div className="scrim" onMouseDown={e=>e.target===e.currentTarget&&setCartOpen(false)}><aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="Request cart"><div className="drawer-header"><div><span className="section-eyebrow">YOUR SELECTION</span><h2>Request cart.</h2></div><button className="icon-button" aria-label="Close cart" onClick={()=>setCartOpen(false)}><X/></button></div><div className="drawer-lines">{liveCart.length?liveCart.map(p=><div className="drawer-line" key={p.id}><div className="mini-product"><Droplet size={24}/></div><div className="drawer-detail"><strong>{p.label}</strong><small>{p.vials_per_pack} × 30 mL · {money(p.price_cents)} per package</small><div className="mini-stepper"><button aria-label={`Remove one ${p.label}`} onClick={()=>adjust(p,-1)}><Minus size={14}/></button><span>{p.quantity}</span><button aria-label={`Add one ${p.label}`} onClick={()=>adjust(p,1)}><Plus size={14}/></button></div></div><strong>{money(p.quantity*p.price_cents)}</strong></div>):<div className="empty-state"><ShoppingBag size={38}/><h3>Your request is empty</h3><p>Select a packaging format to continue.</p></div>}</div>{liveCart.length>0&&<div className="drawer-bottom"><div className="drawer-summary"><span>{cartCountVials(cart)} total vials · Product subtotal</span><strong>{money(subtotal)}</strong></div><p>Packaging and product subtotal only. Taxes, delivery, eligibility and fulfillment are reviewed separately.</p><button className="primary-button" onClick={begin}>Continue request <ArrowRight size={18}/></button></div>}</aside></div>}
+  {authOpen&&<Auth close={()=>setAuthOpen(false)} alert={alert}/>}
+  {recoveryOpen&&<Recovery close={()=>setRecoveryOpen(false)} alert={alert}/>}
+  {checkout&&<Checkout close={()=>setCheckout(false)} session={session} items={liveCart} subtotal={subtotal} alert={alert} finished={()=>{setCheckout(false);setCart([]);refresh()}}/>}
+  {ordersOpen&&<div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&setOrdersOpen(false)}><section className="dialog order-history" role="dialog" aria-modal="true" aria-label="Your requests"><button className="dialog-x" onClick={()=>setOrdersOpen(false)} aria-label="Close requests"><X/></button><span className="section-eyebrow">ACCOUNT</span><h2>Your requests</h2><p>Requests are not sales or payment confirmations.</p>{orders.length?orders.map(o=><div className="history-row" key={o.id}><div><strong>{o.order_number}</strong><small>{date(o.created_at)} · {(o.order_items||[]).map(i=>`${i.quantity} × ${i.package_label||'Single vial'}`).join(', ')}</small></div><div><span>{statusLabels[o.status]}</span><strong>{money(o.subtotal_cents)}</strong></div></div>):<p>No requests recorded.</p>}<button className="secondary-button full" onClick={()=>{setOrdersOpen(false);signOut()}}><LogOut size={16}/> Sign out</button></section></div>}
+ </>;
+}
+function Auth({close,alert}){
+ const [mode,setMode]=useState('sign-in'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false);
+ const submit=async e=>{e.preventDefault();if(!supabase){alert('Supabase authentication is not configured.',true);return}setBusy(true);try{
+  if(mode==='reset'){const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin});if(error)throw error;alert('If the account exists, a recovery email has been sent.');close();}
+  else if(mode==='create'){const {data,error}=await supabase.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}});if(error)throw error;
+   alert(data.session?'Account created.':'Check your email for a verification link.');if(data.session)close();else setMode('sign-in');}
+  else {const {error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;alert('Signed in');close();}
+ }catch(e){alert(e.message||'Authentication failed',true)}finally{setBusy(false)}};
+ return <div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="dialog auth-dialog" role="dialog" aria-modal="true" aria-label="Account access"><button className="dialog-x" onClick={close} aria-label="Close"><X/></button><div className="auth-symbol"><Lock size={25}/></div><span className="section-eyebrow">SECURE ACCOUNT</span><h2>{mode==='reset'?'Recover access.':mode==='create'?'Create an account.':'Welcome back.'}</h2><p>Verified account access is required for request submission.</p><form onSubmit={submit} className="form-stack"><Field label="Email address"><input type="email" required autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)}/></Field>{mode!=='reset'&&<Field label="Password"><input type="password" minLength={6} required autoComplete={mode==='create'?'new-password':'current-password'} value={password} onChange={e=>setPassword(e.target.value)}/></Field>}<button className="primary-button" disabled={busy}>{busy?'Please wait…':mode==='reset'?'Send recovery email':mode==='create'?'Create account':'Sign in'} <ArrowRight size={17}/></button></form><div className="auth-options"><button onClick={()=>setMode(mode==='create'?'sign-in':'create')}>{mode==='create'?'Already have an account?':'Create an account'}</button><button onClick={()=>setMode(mode==='reset'?'sign-in':'reset')}>{mode==='reset'?'Back to sign in':'Forgot password?'}</button></div></div></div>;
+}
+function Checkout({close,session,items,subtotal,alert,finished}){
+ const [name,setName]=useState(''),[address,setAddress]=useState(''),[city,setCity]=useState(''),[region,setRegion]=useState('ON'),[postal,setPostal]=useState(''),[notes,setNotes]=useState(''),[busy,setBusy]=useState(false);
+ const submit=async e=>{e.preventDefault();setBusy(true);try{const res=await callApi('submit-order',session,{name,shipping:{address:address.trim(),city:city.trim(),region,postal:formatCanadianPostal(postal),country:'Canada'},notes,items:items.map(p=>({package_id:p.id,quantity:p.quantity}))});alert(`${res.message} Reference ${res.order_id.slice(0,8).toUpperCase()}.`);finished()}catch(e){alert(e.message||'Unable to submit',true)}finally{setBusy(false)}};
+ return <div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&!busy&&close()}><div className="dialog checkout-dialog" role="dialog" aria-modal="true" aria-label="Submit request"><button className="dialog-x" onClick={close} aria-label="Close" disabled={busy}><X/></button><span className="section-eyebrow">REVIEW REQUEST</span><h2>Submission details.</h2><div className="checkout-top">{items.map(p=><div key={p.id}><span>{p.quantity} × {p.label} ({p.quantity*p.vials_per_pack} vials)</span><strong>{money(p.quantity*p.price_cents)}</strong></div>)}<div className="checkout-total"><span>Product subtotal · CAD</span><strong>{money(subtotal)}</strong></div></div><form onSubmit={submit} className="form-stack"><Field label="Full name"><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></Field><Field label="Account email"><input disabled value={session?.user?.email||''}/></Field><Field label="Street address"><input required minLength={5} maxLength={150} value={address} onChange={e=>setAddress(e.target.value)}/></Field><div className="field-pair"><Field label="City"><input required minLength={2} maxLength={100} value={city} onChange={e=>setCity(e.target.value)}/></Field><Field label="Province / Territory"><select value={region} onChange={e=>setRegion(e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></Field></div><Field label="Canadian postal code"><input required value={postal} maxLength={7} placeholder="K1A 0B1" onChange={e=>setPostal(e.target.value.toUpperCase())} pattern="[A-Za-z][0-9][A-Za-z][ ]?[0-9][A-Za-z][0-9]"/></Field><Field label="Notes (optional)"><textarea rows={2} maxLength={1000} value={notes} onChange={e=>setNotes(e.target.value)}/></Field><p className="checkout-warning">No payment is collected. Requests do not reserve stock. Approval requires eligibility and inventory review.</p><button className="primary-button" disabled={busy}>{busy?'Submitting…':'Submit request'} <ArrowRight size={17}/></button></form></div></div>;
 }
 
-function AuthModal({close,toast,session}){
-  const [mode,setMode]=useState('signin');const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [busy,setBusy]=useState(false);
-  async function submit(e){e.preventDefault();if(!supabase){toast('Connect Supabase to enable sign-in.','error');return;}setBusy(true);try{
-    if(mode==='signup'){
-      const {data,error}=await supabase.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}});
-      if(error)throw error;
-      if(data.session){toast('Account created.');close();}else{toast('Check your inbox to verify your email before signing in.');setMode('signin');}
-    }else{
-      const {error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;toast('Signed in successfully');close();
-    }
-  }catch(err){toast(err.message||'Authentication failed','error');}finally{setBusy(false);}}
-  return <div className="overlay overlay-center" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal auth-modal"><button className="round-close modal-x" onClick={close}><X/></button><span className="auth-mark"><LockKeyhole size={24}/></span><div className="eyebrow subtle">SECURE ACCOUNT</div><h2>{mode==='signin'?'Welcome back.':'Create an account.'}</h2><p className="muted">{mode==='signin'?'Access your order requests and admin tools.':'Email verification is required before placing an order.'}</p><div className="tabs"><button className={mode==='signin'?'active':''} onClick={()=>setMode('signin')}>Sign in</button><button className={mode==='signup'?'active':''} onClick={()=>setMode('signup')}>Create account</button></div><form onSubmit={submit} className="form-stack"><Field label="Email address"><input type="email" required autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></Field><Field label="Password"><input type="password" required minLength={6} autoComplete={mode==='signin'?'current-password':'new-password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password"/></Field><button className="btn btn-primary btn-block" disabled={busy}>{busy?'Please wait…':mode==='signin'?'Sign in':'Create account'} <ArrowRight size={16}/></button></form><p className="auth-help">Accounts are managed securely through Supabase Authentication.</p></div></div>;
-}
-
-function CheckoutModal({close,session,cartItems,subtotal,toast,finished}){
-  const [name,setName]=useState('');const [address,setAddress]=useState('');const [city,setCity]=useState('');const [region,setRegion]=useState('ON');const [postal,setPostal]=useState('');const [notes,setNotes]=useState('');const [busy,setBusy]=useState(false);
-  async function submit(e){e.preventDefault();setBusy(true);try{
-    const response=await callApi('submit-order',session,{name,shipping:{address:address.trim(),city:city.trim(),region,postal:formatCanadianPostal(postal),country:'Canada'},notes,items:cartItems});
-    toast(`${response.message} Reference: ${response.order_id.slice(0,8).toUpperCase()}`);finished();
-  }catch(err){toast(err.message,'error');}finally{setBusy(false);}}
-  return <div className="overlay overlay-center" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><div className="modal checkout-modal"><button className="round-close modal-x" onClick={close}><X/></button><div className="eyebrow subtle">ORDER REQUEST</div><h2>Review & submit.</h2><div className="checkout-summary"><span>Products subtotal</span><strong>{money(subtotal)}</strong><small>CAD product subtotal only. Shipping and applicable taxes are reviewed before any sale; no payment is processed.</small></div><form onSubmit={submit} className="form-stack checkout-form"><Field label="Full name"><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)} placeholder="First and last name"/></Field><Field label="Account email"><input disabled value={session?.user?.email||''}/></Field><Field label="Street address"><input required minLength={5} maxLength={150} value={address} onChange={e=>setAddress(e.target.value)} placeholder="Street and unit number"/></Field><div className="two-col"><Field label="City"><input required value={city} maxLength={100} onChange={e=>setCity(e.target.value)}/></Field><Field label="Province or territory"><select required value={region} onChange={e=>setRegion(e.target.value)}>{CANADIAN_PROVINCES.map(province=><option key={province.code} value={province.code}>{province.name}</option>)}</select></Field></div><div className="two-col"><Field label="Canadian postal code"><input required value={postal} maxLength={7} placeholder="K1A 0B1" autoCapitalize="characters" onChange={e=>setPostal(e.target.value.toUpperCase())} pattern="[A-Za-z][0-9][A-Za-z][ ]?[0-9][A-Za-z][0-9]" title="Enter a Canadian postal code, for example K1A 0B1"/></Field><Field label="Country"><input value="Canada" disabled/></Field></div><Field label="Notes (optional)"><textarea rows="2" maxLength={1000} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Delivery or order details"/></Field><div className="policy-note"><ShieldCheck size={18}/> Requests are limited to Canadian delivery addresses. Submission is not a sale. The Ontario-based operator must review eligibility, compliance, shipping, and the applicable tax treatment before fulfillment.</div><button disabled={busy} className="btn btn-primary btn-block">{busy?'Submitting…':'Submit order request'} <ArrowRight size={17}/></button></form></div></div>;
+function Recovery({close,alert}){
+ const [password,setPassword]=useState(''),[busy,setBusy]=useState(false);
+ const submit=async e=>{e.preventDefault();setBusy(true);try{const {error}=await supabase.auth.updateUser({password});if(error)throw error;alert('Password updated successfully.');close();}catch(e){alert(e.message||'Unable to update password',true)}finally{setBusy(false)}};
+ return <div className="scrim centered"><div className="dialog auth-dialog" role="dialog" aria-modal="true" aria-label="Set a new password"><div className="auth-symbol"><Lock size={25}/></div><span className="section-eyebrow">ACCOUNT RECOVERY</span><h2>Set a new password.</h2><p>Your recovery link has been verified. Choose a new password below.</p><form onSubmit={submit} className="form-stack"><Field label="New password"><input required autoComplete="new-password" type="password" minLength={8} value={password} onChange={e=>setPassword(e.target.value)}/></Field><button className="primary-button" disabled={busy}>{busy?'Updating…':'Update password'} <ArrowRight size={17}/></button></form></div></div>;
 }

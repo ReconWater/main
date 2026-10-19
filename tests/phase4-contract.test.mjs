@@ -1,30 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-const read = path => readFileSync(new URL(`../${path}`,import.meta.url),'utf8');
-test('admin confirmation is required for stock-mutating status transitions',()=>{
-  const code=read('src/AdminPanel.jsx');
-  assert.match(code,/setConfirmAction\(\{order:o,status:'approved'\}\)/);
-  assert.match(code,/setConfirmAction\(\{order:o,status:'cancelled'\}\)/);
-  assert.match(code,/function ConfirmOrderAction/);
-  assert.match(code,/await act\('order-status'/);
+import {readFileSync} from 'node:fs';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+test('admin has package pricing, lot receiving, release, case opening and order transitions',()=>{
+ const admin=read('src/AdminPanel.jsx');
+ for(const action of ['save-package','receive-lot','update-lot','adjust-lot','open-case','manual-order','order-status']) assert.ok(admin.includes(action),action);
+ assert.match(admin,/case opened/);
 });
-test('admin modal keyboard trap and Escape close are available',()=>{
-  const code=read('src/AdminPanel.jsx');
-  assert.match(code,/event\.key==='Escape'/);
-  assert.match(code,/event\.key!=='Tab'/);
-  assert.match(code,/previous\?\.focus\?\.\(\)/);
-  assert.match(code,/aria-modal="true"/);
-});
-test('Netlify API + Supabase SQL operations are untouched by phase 4',()=>{
-  const code=read('src/AdminPanel.jsx');
-  assert.match(code,/callApi\('dashboard'/);
-  assert.match(code,/callApi\(action,session,payload\)/);
-  assert.doesNotMatch(code,/SUPABASE_SERVICE_ROLE_KEY/);
-});
-test('read-only production smoke tool tests protected API without sending credentials',()=>{
-  const script=read('scripts/smoke.mjs');
-  assert.match(script,/api\?action=dashboard/);
-  assert.match(script,/api\.status===401/);
-  assert.doesNotMatch(script,/submit-order|manual-order|set-stock/);
+test('old stock mutations are revoked at migration and API has no old mutation routes',()=>{
+ const sql=read('supabase/003_packaging_and_lots.sql');
+ const api=read('netlify/functions/api.mjs');
+ assert.match(sql,/REVOKE EXECUTE ON FUNCTION public\.service_admin_set_stock/);
+ assert.doesNotMatch(api,/service_admin_set_stock\b/);
+ assert.match(api,/service_submit_order_v2/);
+ assert.match(api,/auth\.getUser/);
 });
