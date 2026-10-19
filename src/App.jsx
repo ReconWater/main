@@ -3,6 +3,7 @@ import {Activity,ArrowRight,ArrowUpRight,Check,ChevronDown,ClipboardCheck,Clipbo
 import {supabase,configured,callApi,money} from './supabase';
 import {CANADIAN_PROVINCES,formatCanadianPostal} from './canada';
 import {RECON_PRODUCT_MEDIA} from './productMedia';
+import HeroExperience from './HeroExperience';
 import {vialCount,formatAvailability,isRequestable} from './packaging';
 const AdminPanel=React.lazy(()=>import('./AdminPanel.jsx'));
 const toSection=id=>document.getElementById(id)?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
@@ -28,41 +29,8 @@ function ProductVisual({mode='hero'}){
 }
 function Badge({good,children}){return <span className={`stock-indicator ${good?'stock-good':'stock-off'}`}><i/>{children}</span>}
 function MainShop({product,packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd}){
- const chosen=packages.find(p=>p.id===selected)||packages[0];
- const {remaining}=formatAvailability(chosen,cart,stock);
- const effectiveQty=Math.min(Math.max(1,packQty),Math.max(1,remaining));
- const available=isRequestable(chosen,{remaining});
- const sub=chosen?money(chosen.price_cents):'Pricing pending';
- const perVial=chosen?.price_cents?money(Math.round(chosen.price_cents/chosen.vials_per_pack)):'—';
  return <main id="main-content">
-  <section id="product" className="product-hero"><div className="container">
-   <div className="breadcrumb"><span>RECON WATER</span><span className="crumb-divider">/</span><strong>PRODUCT 001</strong></div>
-   <div className="hero-grid">
-    <div className="hero-image-wrap"><ProductVisual/><div className="stage-footnote"><span><ShieldCheck size={15}/> Product imagery subject to verification</span><span>30 mL / INJECTION USP</span></div></div>
-    <div className="hero-information"><div className="micro-heading"><i/> HOSPIRA / PFIZER CANADA</div>
-      <h1>Bacteriostatic Water<br/><span>for Injection USP.</span></h1>
-      <p className="hero-subtitle">30 mL multi-dose vial <span>·</span> DIN 00038202</p>
-      <p className="hero-description">One product. Three precise packaging formats. Product information, availability, and CAD pricing in one clear place.</p>
-      <div className="spec-stripe"><div><small>FORMAT</small><strong>30 mL</strong></div><div><small>MANUFACTURER</small><strong>Hospira / Pfizer</strong></div><div><small>REGION</small><strong>Ontario, Canada</strong></div></div>
-      <div className="selection-head"><div><span>01 / SELECT PACKAGE</span><p>Select your preferred format</p></div><span className="subtle-badge">ONE PRODUCT</span></div>
-      <div className="format-grid" role="radiogroup" aria-label="Package format">
-      {packages.length?packages.map(p=><button type="button" key={p.id} role="radio" aria-checked={chosen?.id===p.id} className={`format-option ${chosen?.id===p.id?'is-selected':''}`} onClick={()=>{setSelected(p.id);setPackQty(1)}}>
-       <span className="format-top"><span>{p.code==='single'?'SINGLE':p.code==='ten'?'BUNDLE':'FACTORY SEALED'}</span>{chosen?.id===p.id&&<Check size={16}/>}</span>
-       <strong>{p.vials_per_pack}<small>{p.vials_per_pack===1?'vial':'vials'}</small></strong><span className="format-price">{money(p.price_cents)}</span>
-       <span className="format-sub">{p.code==='case'?'Original 25-vial case':p.code==='ten'?'Assembled 10-vial bundle':'Individual vial'}</span>
-      </button>):<div className="format-empty">Package pricing is being configured. No ordering is available yet.</div>}
-      </div>
-      {chosen&&<div className="purchase-box">
-        <div className="purchase-pricing"><div><span>SELECTED PACKAGE · CAD</span><strong>{sub}</strong><small>{chosen.vials_per_pack} × 30 mL · {perVial} per vial equivalent</small></div>
-        <Badge good={available}>{!chosen.active?'Requests disabled':!chosen.price_cents?'Pricing pending':getAvailable(chosen)===0?'Currently unavailable':remaining===0?'Request limit reached':'Available for review'}</Badge></div>
-        <div className="purchase-controls"><div className="stepper" role="group" aria-label="Number of selected packages"><button aria-label="Decrease packages" type="button" disabled={!available||effectiveQty<=1} onClick={()=>setPackQty(Math.max(1,effectiveQty-1))}><Minus size={17}/></button><output aria-label="Package quantity">{effectiveQty}</output><button aria-label="Increase packages" type="button" disabled={!available||effectiveQty>=remaining} onClick={()=>setPackQty(Math.min(remaining,effectiveQty+1))}><Plus size={17}/></button></div>
-         <button className="primary-button purchase-cta" disabled={!available} type="button" onClick={()=>onAdd(chosen,effectiveQty)}><ShoppingBag size={18}/> Add to request <ArrowRight size={19}/></button></div>
-        <p className="purchase-note"><ShieldCheck size={15}/> Requests are reviewed individually. No payment is collected or inventory reserved at submission.</p>
-      </div>}
-      <div className="hero-endnotes"><span><ClipboardCheck size={16}/> Reviewed requests</span><span><PackageCheck size={16}/> Lot-managed inventory</span></div>
-    </div>
-   </div>
-  </div></section>
+  <HeroExperience product={product} packages={packages} stock={stock} selected={selected} onSelect={id=>{setSelected(id);setPackQty(1)}} quantity={packQty} onQuantity={setPackQty} cart={cart} onAdd={onAdd} onExplore={()=>toSection("details")}/>
   <div className="credibility-strip"><div className="container credibility-inner"><span><PackageCheck size={19}/> Lot-tracked availability</span><span><ShieldCheck size={19}/> Admin-reviewed requests</span><span><Truck size={19}/> Canadian address validation</span></div></div>
   <section id="details" className="content-section"><div className="container section-columns"><div className="section-intro"><span className="section-eyebrow">02 / PRODUCT DETAILS</span><h2>Designed around<br/>the essentials.</h2><p>Accurate packaging descriptions, transparent ordering terms and manufacturer information — without unnecessary claims.</p></div><div className="detail-panel">
     <div className="detail-row"><span>Product</span><strong>Bacteriostatic Water for Injection USP</strong></div>

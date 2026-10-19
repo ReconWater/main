@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
-test('storefront lazy-loads admin and uses one font family with motion alternatives',()=>{
+test('storefront lazy-loads admin and uses restrained brand font pair with motion alternatives',()=>{
  assert.match(read('src/App.jsx'),/React\.lazy\(\(\)=>import\('\.\/AdminPanel\.jsx'\)\)/);
  assert.match(read('index.html'),/Manrope/);
- assert.doesNotMatch(read('index.html'),/DM\+Serif/);
+ assert.match(read('index.html'),/DM\+Serif\+Display/);
  assert.match(read('src/styles.css'),/prefers-reduced-motion/);
 });
 test('server keeps historical prices and variants server-authoritative',()=>{
