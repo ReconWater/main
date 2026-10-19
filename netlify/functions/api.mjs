@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import {packageAvailability} from '../../src/availability.js';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const safeError = e => {
@@ -6,8 +7,6 @@ const safeError = e => {
   if (/^(Invalid|Insufficient|Too many|Package|Product|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
-const sumStock = (lots,kind) => lots.filter(l=>l.status==='available' && l.expiry_date && l.expiry_date>new Date().toISOString().slice(0,10))
- .reduce((n,l)=>n+Math.max(0,Number(l[`${kind}_on_hand`])-Number(l[`${kind}_reserved`])),0);
 
 export default async request => {
   const url=process.env.SUPABASE_URL, key=process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,14 +23,9 @@ export default async request => {
       for(const r of [p,v,l]) if(r.error) throw r.error;
       const product=p.data?.[0]||null;
       const stock=(l.data||[]).filter(lot=>lot.product_id===product?.id);
-      const loose=sumStock(stock,'loose'),sealed=sumStock(stock,'sealed');
-      const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({ ...q,
-        available_packages:q.code==='ten'
-          ? stock.filter(lot=>lot.status==='available' && lot.expiry_date && lot.expiry_date>new Date().toISOString().slice(0,10))
-             .reduce((n,lot)=>n+Math.floor(Math.max(0,lot.loose_on_hand-lot.loose_reserved)/10),0)
-          : Math.floor((q.stock_kind==='loose'?loose:sealed)/(q.stock_kind==='loose'?q.vials_per_pack:1))
-      }));
-      return reply({product,packages,stock:{loose,sealed}});
+      const counts=packageAvailability((v.data||[]).filter(q=>q.product_id===product?.id),stock);
+      const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({...q,available_packages:counts.byId[q.id]??0}));
+      return reply({product,packages,stock:{loose:counts.loose,sealed:counts.sealed}});
     }
     if(request.method!=='POST') return reply({error:'Method not allowed'},405);
     const auth=request.headers.get('authorization')||'';
@@ -65,7 +59,8 @@ export default async request => {
         db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50)
       ]);
       for(const r of [pr,pk,lo,ord,ev,alloc,prices]) if(r.error)throw r.error;
-      return reply({products:pr.data,packages:pk.data,lots:lo.data,orders:ord.data,
+      const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
+      return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data});
     }
     if(action==='orders-page') {
