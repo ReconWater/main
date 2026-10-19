@@ -43,7 +43,6 @@ function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOr
   return <>
     <div className="rw-topbar"><div className="container rw-topbar-inner">
       <span><span className="rw-topbar-dot"/> INDEPENDENT · ONTARIO BASED</span>
-      <span>PRODUCT INFORMATION &amp; REQUEST REVIEW <ArrowUpRight size={13}/></span>
     </div></div>
     <header className="rw-header"><div className="container rw-header-inner">
       <button type="button" className="rw-home" onClick={()=>navigate('shop')} aria-label="Recon Water homepage"><BrandWordmark/></button>

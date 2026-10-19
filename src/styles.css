@@ -143,7 +143,6 @@ html{scroll-padding-top:108px}
 .rw-topbar{background:#102b35;color:#e6f3f1}
 .rw-topbar-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:34px;font-size:9px;letter-spacing:.16em;font-weight:700}
 .rw-topbar-inner>span{display:inline-flex;align-items:center;gap:10px}
-.rw-topbar-inner>span:last-child{color:#a8c8ca}
 .rw-topbar-dot{width:5px;height:5px;border-radius:50%;background:#c7a775;box-shadow:0 0 0 4px #c7a77526}
 .rw-header{position:sticky;top:0;z-index:50;border-bottom:1px solid #dce6e3;background:#ffffffee;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
 .rw-header-inner{min-height:88px;display:flex;align-items:center;gap:32px;justify-content:space-between}
@@ -193,7 +192,6 @@ html{scroll-padding-top:108px}
 @media(max-width:760px){
   html{scroll-padding-top:76px}
   .rw-topbar-inner{justify-content:center;min-height:30px;font-size:8px}
-  .rw-topbar-inner>span:last-child{display:none}
   .rw-header-inner{min-height:73px;gap:12px}
   .rw-brand-symbol{height:40px;width:40px;border-radius:12px 4px 12px 4px}
   .rw-brand-type strong{font-size:20px}
