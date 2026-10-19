@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, ArrowRight, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Truck, UserRound, Warehouse, X, AlertCircle, RefreshCcw, Save, PencilLine, Clock, Trash2 } from 'lucide-react';
+import { Activity, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDown, MapPin, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Truck, UserRound, Warehouse, X, AlertCircle, RefreshCcw, Save, PencilLine, Clock, Trash2 } from 'lucide-react';
 import { supabase, configured, callApi, money } from './supabase';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
 
@@ -12,6 +12,90 @@ function VialVisual({large=false}) {
     <span className="art-deco art-deco-a"/><span className="art-deco art-deco-b"/>
   </div>;
 }
+function BrandWordmark({ inverse = false }) {
+  return <span className={`rw-brand ${inverse ? 'rw-brand-inverse' : ''}`}>
+    <span className="rw-brand-symbol" aria-hidden="true"><Droplets size={23} strokeWidth={1.7}/></span>
+    <span className="rw-brand-type"><strong>recon<span>water</span><span className="rw-brand-period">.</span></strong><small>ONTARIO · CANADA</small></span>
+  </span>;
+}
+
+function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOrders, setOrdersOpen, setAuthOpen, setCartOpen, totalCount}) {
+  const goToSection = (id) => {
+    if (route !== 'shop') navigate('shop');
+    else setMobileOpen(false);
+    window.setTimeout(() => document.getElementById(id)?.scrollIntoView({behavior:'smooth'}), route === 'shop' ? 0 : 75);
+  };
+  return <>
+    <div className="rw-topbar"><div className="container rw-topbar-inner">
+      <span><span className="rw-topbar-dot"/> INDEPENDENT · ONTARIO BASED</span>
+      <span>PRODUCT INFORMATION &amp; REQUEST REVIEW <ArrowUpRight size={13}/></span>
+    </div></div>
+    <header className="rw-header"><div className="container rw-header-inner">
+      <button type="button" className="rw-home" onClick={()=>navigate('shop')} aria-label="Recon Water homepage"><BrandWordmark/></button>
+      <nav id="rw-navigation" className={`rw-navigation ${mobileOpen ? 'rw-navigation-open' : ''}`} aria-label="Primary navigation">
+        <button type="button" className={route==='shop'?'rw-nav-active':''} onClick={()=>goToSection('products')}>The product</button>
+        <button type="button" onClick={()=>goToSection('about')}>Our approach</button>
+        <button type="button" onClick={()=>goToSection('how')}>How it works</button>
+      </nav>
+      <div className="rw-header-actions">
+        {session
+          ? <button className="rw-account" type="button" onClick={()=>{loadOrders();setOrdersOpen(true);}}><UserRound size={17}/><span>My requests</span></button>
+          : <button className="rw-account" type="button" onClick={()=>setAuthOpen(true)}><UserRound size={17}/><span>Sign in</span></button>}
+        <button className="rw-cart" type="button" aria-label={`Open cart${totalCount ? `, ${totalCount} items` : ''}`} onClick={()=>setCartOpen(true)}><ShoppingBag size={18}/>{totalCount>0&&<em>{totalCount}</em>}</button>
+        <button type="button" className="rw-menu-button" aria-controls="rw-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen?'Close navigation':'Open navigation'} onClick={()=>setMobileOpen(!mobileOpen)}>{mobileOpen?<X size={21}/>:<Menu size={21}/>}</button>
+      </div>
+    </div></header>
+  </>;
+}
+
+function HomepageHero({onExplore,onProcess}) {
+  return <section className="rw-hero" aria-labelledby="rw-hero-heading">
+    <div className="rw-hero-glow" aria-hidden="true"/>
+    <div className="container rw-hero-grid">
+      <div className="rw-hero-copy">
+        <div className="rw-kicker"><span className="rw-kicker-line"/> A NEW STANDARD OF CLARITY</div>
+        <h1 id="rw-hero-heading">Every detail.<br/><span>Considered.</span></h1>
+        <p className="rw-hero-intro">An independent Ontario-based destination for clear product information, current availability, and a straightforward request experience.</p>
+        <div className="rw-hero-actions">
+          <button type="button" className="rw-button rw-button-primary" onClick={onExplore}>Explore the product <ArrowUpRight size={19}/></button>
+          <button type="button" className="rw-button rw-button-link" onClick={onProcess}>Our process <ArrowRight size={17}/></button>
+        </div>
+        <div className="rw-hero-signals">
+          <span><ShieldCheck size={17}/> Requests reviewed individually</span>
+          <span><MapPin size={17}/> Ontario, Canada</span>
+        </div>
+      </div>
+      <div className="rw-hero-stage">
+        <div className="rw-stage-grain" aria-hidden="true"/>
+        <div className="rw-stage-head"><span className="rw-stage-index">01 / PRODUCT FOCUS</span><span className="rw-stage-circle"><ArrowUpRight size={16}/></span></div>
+        <div className="rw-stage-vial"><VialVisual large/></div>
+        <div className="rw-stage-footer">
+          <div><span className="rw-stage-category">BACTERIOSTATIC WATER FOR INJECTION USP</span><strong>30 mL <span>multi-dose vial</span></strong></div>
+          <span className="rw-stage-cross" aria-hidden="true">✳</span>
+        </div>
+        <p className="rw-stage-caveat">Concept illustration · Actual packaging and labeling may differ.</p>
+      </div>
+    </div>
+    <div className="container rw-hero-end"><span>PRODUCT INFORMATION, REFINED</span><span>SCROLL TO EXPLORE <ArrowDown size={14}/></span></div>
+  </section>;
+}
+
+function BrandAbout() {
+  return <section id="about" className="rw-about-section" aria-labelledby="rw-about-title"><div className="container rw-about-inner">
+    <div className="rw-about-number">RW / 001</div>
+    <div className="rw-about-copy"><div className="rw-kicker">THE RECON WATER APPROACH</div><h2 id="rw-about-title">Focused on what <em>matters.</em></h2><p>One place for essential product information, transparent request status, and a carefully organized customer experience. Our process is designed around clarity at each step.</p></div>
+    <div className="rw-about-aside"><span>01 — INFORMATION</span><span>02 — AVAILABILITY</span><span>03 — REVIEW</span></div>
+  </div></section>;
+}
+
+function SiteFooter({navigate}) {
+  return <footer className="rw-footer"><div className="container rw-footer-inner">
+    <div className="rw-footer-intro"><BrandWordmark inverse/><p>Clarity in every detail. An independent product information and request portal based in Ontario, Canada.</p></div>
+    <div className="rw-footer-col"><h3>Explore</h3><button onClick={()=>{navigate('shop');window.setTimeout(()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'}),75);}}>Product information <ArrowUpRight size={13}/></button><button onClick={()=>{navigate('shop');window.setTimeout(()=>document.getElementById('how')?.scrollIntoView({behavior:'smooth'}),75);}}>How it works <ArrowUpRight size={13}/></button><button onClick={()=>navigate('admin')}>Administration <ArrowUpRight size={13}/></button></div>
+    <div className="rw-footer-col"><h3>Product context</h3><p>CAD pricing, Canadian addresses, and individual request review. No online payment is collected through this site.</p><a href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noopener noreferrer">Manufacturer information <ArrowUpRight size={13}/></a></div>
+  </div><div className="container rw-footer-bottom"><span>© {new Date().getFullYear()} Recon Water. Ontario, Canada.</span><span>Independent site · Not affiliated with or endorsed by Hospira or Pfizer.</span></div></footer>;
+}
+
 function Notice({message,onClose}) { return message ? <div className={`toast ${message.type==='error'?'toast-error':''}`} role="status"><span>{message.type==='error'?<AlertCircle size={19}/>:<CheckCircle2 size={19}/>}</span><span>{message.text}</span><button className="icon-button" aria-label="Dismiss notice" onClick={onClose}><X size={16}/></button></div> : null; }
 function Field({label,children,hint}) { return <label className="field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>; }
 function Pill({children,type='neutral'}) {return <span className={`pill pill-${type}`}>{children}</span>;}
@@ -50,23 +134,19 @@ export default function App(){
   const logout=async()=>{await supabase?.auth.signOut();setCart({});setMyOrders([]);toast('Signed out');};
   const refreshAfterOrder=()=>{setCart({});setCheckoutOpen(false);loadOrders();loadProducts();};
   return <>
-    <div className="top-strip"><ShieldCheck size={13}/> ONTARIO-BASED · CANADA-WIDE REQUESTS <span/> ALL ORDERS SUBJECT TO REVIEW</div>
-    <header className="site-header"><div className="container header-inner"><button className="logo" onClick={()=>navigate('shop')} aria-label="Homepage"><span className="logo-mark"><Droplets size={23} strokeWidth={2.2}/></span><span>HOSPIRA<span className="logo-light"> WATER</span><small>INDEPENDENT SUPPLY</small></span></button>
-      <nav className={`main-nav ${mobileOpen?'main-nav-open':''}`}><button className={route==='shop'?'nav-active':''} onClick={()=>navigate('shop')}>Shop</button><button onClick={()=>{navigate('shop');setTimeout(()=>document.getElementById('how')?.scrollIntoView({behavior:'smooth'}),50)}}>How it works</button><button className={route==='admin'?'nav-active':''} onClick={()=>navigate('admin')}>Admin portal</button></nav>
-      <div className="header-actions">{session?<button className="header-account" onClick={()=>{loadOrders();setOrdersOpen(true);}}><UserRound size={17}/><span>My orders</span></button>:<button className="header-account" onClick={()=>setAuthOpen(true)}><UserRound size={17}/><span>Sign in</span></button>}
-        <button className="cart-button" aria-label="Open cart" onClick={()=>setCartOpen(true)}><ShoppingBag size={19}/>{totalCount>0&&<em>{totalCount}</em>}</button>
-        <button className="mobile-menu icon-button" aria-label="Menu" onClick={()=>setMobileOpen(!mobileOpen)}>{mobileOpen?<X/>:<Menu/>}</button></div></div></header>
+    <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setAuthOpen={setAuthOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
     {!configured&&<div className="setup-banner"><AlertCircle size={16}/> Demo mode — connect Supabase and set environment variables to activate the storefront and admin panel.</div>}
     {route==='shop'?<>
-      <main><section className="hero"><div className="container hero-grid"><div className="hero-copy"><div className="eyebrow"><span className="eyebrow-line"/> ONTARIO · CANADA / PRODUCT PORTAL</div><h1>Precision in<br/><i>every detail.</i></h1><p>Based in Ontario, Canada. Explore bacteriostatic water product information and submit requests for individual eligibility and fulfillment review.</p><div className="hero-buttons"><button className="btn btn-primary" onClick={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})}>Explore products <ArrowRight size={18}/></button><button className="btn btn-outline" onClick={()=>document.getElementById('how')?.scrollIntoView({behavior:'smooth'})}>How ordering works</button></div><div className="hero-trust"><span><ShieldCheck size={17}/> Reviewed requests</span><span><PackageCheck size={17}/> Stock visibility</span></div></div><div className="hero-product"><div className="hero-product-badge"><span className="pulse-dot"/> PRODUCT SPOTLIGHT <strong>30 mL</strong></div><VialVisual large/><div className="hero-bottom-line"><span>BACTERIOSTATIC WATER</span><span>30 mL / USP</span></div></div></div></section>
+      <main><HomepageHero onExplore={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})} onProcess={()=>document.getElementById('how')?.scrollIntoView({behavior:'smooth'})}/>
       <section className="benefit-row"><div className="container benefit-grid">{[['verified','Review before fulfillment','Every order is reviewed individually.'],['delivery','Canadian requests','Ontario-based operations with Canadian delivery addresses.'],['stock','Inventory controlled','Stock updates after order approval.']].map(([icon,head,body])=><div className="benefit" key={head}><div className="benefit-icon"><SimpleIcon kind={icon}/></div><div><strong>{head}</strong><p>{body}</p></div></div>)}</div></section>
-      <section id="products" className="section catalog"><div className="container"><div className="section-head"><div><div className="eyebrow subtle">PRODUCT CATALOGUE</div><h2>Our selection<span className="period">.</span></h2><p>Product information, CAD pricing, and current stock availability.</p></div><div className="result-count"><SlidersHorizontal size={17}/> {products.length} {products.length===1?'product':'products'}</div></div>
+      <section id="products" className="section catalog"><div className="container"><div className="section-head"><div><div className="eyebrow subtle">PRODUCT INFORMATION</div><h2>Our focus<span className="period">.</span></h2><p>Product details, CAD pricing, and availability in one place.</p></div><div className="result-count"><SlidersHorizontal size={17}/> {products.length} {products.length===1?'product':'products'}</div></div>
       {products.length===0?<div className="empty"><Box size={36}/><h3>No published Canadian products</h3><p>Use the admin panel to publish the first product.</p></div>:<div className="product-grid">{products.map(p=><article className="product-card" key={p.id}><div className="product-photo"><div className="product-topline"><Pill type={p.stock_quantity>0?'available':'muted'}>{p.stock_quantity>0?'AVAILABLE':'UNAVAILABLE'}</Pill><span>{p.volume_ml?`${p.volume_ml} mL`:p.sku}</span></div><VialVisual/></div><div className="product-body"><div className="product-meta">PRODUCT · {p.sku}</div><h3>{p.name}</h3><p>{p.description}</p><div className="product-bottom"><div><small>UNIT PRICE · CAD</small><strong>{money(p.price_cents)}</strong></div><button className="btn btn-small btn-primary" onClick={()=>add(p)} disabled={!configured || p.stock_quantity<1 || p.price_cents==null}>{p.stock_quantity>0 && p.price_cents!=null?'Add to cart':'Not available'} <ArrowRight size={16}/></button></div></div></article>)}</div>}
       <div className="disclaimer"><ShieldCheck size={20}/><p>Product details are provided for identification only, not medical guidance. Supply, customer eligibility, shipping, and fulfillment must meet applicable laws. Nothing on this site authorizes use or sale of a regulated product.</p></div></div></section>
+      <BrandAbout/>
       <section id="how" className="section how"><div className="container"><div className="how-head"><div className="eyebrow subtle">A STRAIGHTFORWARD PROCESS</div><h2>Simple from selection<br/>to review.</h2></div><div className="steps">{[['01','Browse & select','Review products and quantities before submitting your request.'],['02','Submit a request','Sign in, select a Canadian province or territory, and send your request securely.'],['03','Manual review','An administrator verifies eligibility and availability before fulfillment.']].map(([n,t,b])=><div className="step" key={n}><span className="step-number">{n}</span><div className="step-icon">{n==='01'?<ShoppingBag/>:n==='02'?<ClipboardList/>:<BadgeCheck/>}</div><h3>{t}</h3><p>{b}</p></div>)}</div></div></section>
       <section className="closing-cta"><div className="container closing-inner"><div><div className="eyebrow">CLEAR PROCESS. SECURE RECORDS.</div><h2>Everything in one place.</h2><p>View products, submit requests, and track your order status.</p></div><button className="btn btn-white" onClick={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})}>Browse catalogue <ArrowRight size={18}/></button></div></section></main>
     </>:<AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={toast} onSignOut={logout} reloadPublic={loadProducts}/>}
-    <footer className="footer"><div className="container footer-main"><div><div className="footer-logo"><Droplets size={22}/> HOSPIRA WATER</div><p>Ontario-based Canadian supply portal concept. Not affiliated with, sponsored by, or endorsed by Hospira or Pfizer.</p></div><div><strong>Explore</strong><button onClick={()=>navigate('shop')}>Products</button><button onClick={()=>navigate('admin')}>Administration</button></div><div><strong>Information</strong><p>Canadian addresses only. All requests are subject to human review; no online payments are processed.</p><a href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noreferrer">Manufacturer information <ArrowRight size={12}/></a></div></div><div className="container footer-bottom"><span>© {new Date().getFullYear()} Hospira Water. Ontario, Canada · Independent supply concept.</span><span>Built with Netlify + Supabase</span></div></footer>
+    <SiteFooter navigate={navigate}/>
     <Notice message={notice} onClose={()=>setNotice(null)}/>
     {cartOpen&&<div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setCartOpen(false)}}><div className="drawer"><div className="drawer-head"><div><small>YOUR SELECTION</small><h2>Order cart <span>({totalCount})</span></h2></div><button className="round-close" onClick={()=>setCartOpen(false)}><X/></button></div><div className="drawer-content">{inCart.length===0?<div className="empty-cart"><ShoppingBag size={42}/><h3>Your cart is empty</h3><p>Add an available product to begin.</p><button className="btn btn-primary" onClick={()=>setCartOpen(false)}>Continue browsing</button></div>:inCart.map(p=><div className="cart-item" key={p.id}><div className="cart-thumbnail"><Droplets size={28}/></div><div className="cart-details"><strong>{p.name}</strong><small>{p.volume_ml} mL · {money(p.price_cents)}</small><div className="qty-controls"><button aria-label="Decrease quantity" onClick={()=>qty(p,-1)}><Minus size={15}/></button><span>{cart[p.id]}</span><button aria-label="Increase quantity" onClick={()=>qty(p,1)}><Plus size={15}/></button></div></div><strong>{money(p.price_cents*cart[p.id])}</strong></div>)}</div>{totalCount>0&&<div className="drawer-bottom"><div className="total-row"><span>Estimated subtotal</span><strong>{money(subtotal)}</strong></div><p>All prices in CAD. Applicable taxes, domestic delivery charges, eligibility, and fulfillment are reviewed separately. No payment is collected.</p><button className="btn btn-primary btn-block" onClick={beginCheckout}>Continue to request <ArrowRight size={17}/></button></div>}</div></div>}
     {authOpen&&<AuthModal close={()=>setAuthOpen(false)} toast={toast} session={session}/>}
