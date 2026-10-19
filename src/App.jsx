@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, ArrowDown, MapPin, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, Truck, UserRound, X, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, Truck, UserRound, X, AlertCircle } from 'lucide-react';
 import { supabase, configured, callApi, money } from './supabase';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
 import ProductExperience from './ProductExperience';
+import HeroExperience from './HeroExperience';
 
 // Explicit route boundary: administration and its CSS are not part of the storefront entry bundle.
 const AdminPanel = React.lazy(() => import('./AdminPanel.jsx'));
-import { RECON_PRODUCT_MEDIA } from './productMedia';
 import { maxOrderable, nextCartQuantity, MAX_REQUEST_UNITS } from './productQuantity';
 
 const scrollToSection = (id, delay=0) => {
@@ -61,38 +61,6 @@ function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOr
       </div>
     </div></header>
   </>;
-}
-
-function HomepageHero({onExplore,onProcess}) {
-  return <section className="rw-hero" aria-labelledby="rw-hero-heading">
-    <div className="rw-hero-glow" aria-hidden="true"/>
-    <div className="container rw-hero-grid">
-      <div className="rw-hero-copy">
-        <div className="rw-kicker"><span className="rw-kicker-line"/> A NEW STANDARD OF CLARITY</div>
-        <h1 id="rw-hero-heading">Every detail.<br/><span>Considered.</span></h1>
-        <p className="rw-hero-intro">An independent Ontario-based destination for clear product information, current availability, and a straightforward request experience.</p>
-        <div className="rw-hero-actions">
-          <button type="button" className="rw-button rw-button-primary" onClick={onExplore}>Explore the product <ArrowUpRight size={19}/></button>
-          <button type="button" className="rw-button rw-button-link" onClick={onProcess}>Our process <ArrowRight size={17}/></button>
-        </div>
-        <div className="rw-hero-signals">
-          <span><ShieldCheck size={17}/> Requests reviewed individually</span>
-          <span><MapPin size={17}/> Ontario, Canada</span>
-        </div>
-      </div>
-      <div className="rw-hero-stage">
-        <div className="rw-stage-grain" aria-hidden="true"/>
-        <div className="rw-stage-head"><span className="rw-stage-index">01 / PRODUCT FOCUS</span><span className="rw-stage-circle"><ArrowUpRight size={16}/></span></div>
-        <div className="rw-stage-vial">{RECON_PRODUCT_MEDIA.front ? <img className="rw-stage-photo" src={RECON_PRODUCT_MEDIA.front} decoding="async" loading="eager" fetchPriority="high" alt="Hospira 30 mL bacteriostatic water vial, actual product photograph" onError={(e)=>{e.currentTarget.hidden=true; e.currentTarget.nextElementSibling.hidden=false;}}/> : null}<div hidden={!!RECON_PRODUCT_MEDIA.front}><VialVisual large/></div></div>
-        <div className="rw-stage-footer">
-          <div><span className="rw-stage-category">BACTERIOSTATIC WATER FOR INJECTION USP</span><strong>30 mL <span>multi-dose vial</span></strong></div>
-          <span className="rw-stage-cross" aria-hidden="true">✳</span>
-        </div>
-        <p className="rw-stage-caveat">{RECON_PRODUCT_MEDIA.front ? "Photograph supplied by Recon Water · Verify product packaging before publication." : "Concept illustration · Actual packaging and labeling may differ."}</p>
-      </div>
-    </div>
-    <div className="container rw-hero-end"><span>PRODUCT INFORMATION, REFINED</span><span>SCROLL TO EXPLORE <ArrowDown size={14}/></span></div>
-  </section>;
 }
 
 function BrandAbout() {
@@ -159,7 +127,7 @@ export default function App(){
     <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setAuthOpen={setAuthOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
     {!configured&&<div className="setup-banner"><AlertCircle size={16}/> Demo mode — connect Supabase and set environment variables to activate the storefront and admin panel.</div>}
     {route==='shop'?<>
-      <main id="main-content"><HomepageHero onExplore={()=>scrollToSection('products')} onProcess={()=>scrollToSection('how')}/>
+      <main id="main-content"><HeroExperience onExplore={()=>scrollToSection('products')} onProcess={()=>scrollToSection('how')}/>
       <section className="benefit-row"><div className="container benefit-grid">{[['verified','Review before fulfillment','Every order is reviewed individually.'],['delivery','Canadian requests','Ontario-based operations with Canadian delivery addresses.'],['stock','Inventory controlled','Stock updates after order approval.']].map(([icon,head,body])=><div className="benefit" key={head}><div className="benefit-icon"><SimpleIcon kind={icon}/></div><div><strong>{head}</strong><p>{body}</p></div></div>)}</div></section>
       <section id="products" className="rw-products-section section" aria-labelledby="rw-products-heading"><div className="container">
         <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div><span className="rw-products-counter">{products.length.toString().padStart(2,'0')} / PUBLISHED {products.length===1?'PRODUCT':'PRODUCTS'}</span></div>
