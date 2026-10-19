@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, Truck, UserRound, X, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, Box, Check, CheckCircle2, ChevronDown, CreditCard, Droplets, FileText, HeartPulse, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, UserRound, X, AlertCircle } from 'lucide-react';
 import { supabase, configured, callApi, money } from './supabase';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
 import ProductExperience from './ProductExperience';
@@ -34,7 +34,7 @@ function BrandWordmark({ inverse = false }) {
   </span>;
 }
 
-function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOrders, setOrdersOpen, setAuthOpen, setCartOpen, totalCount}) {
+function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOrders, setOrdersOpen, setCartOpen, totalCount}) {
   const goToSection = (id) => {
     if (route !== 'shop') navigate('shop');
     else setMobileOpen(false);
@@ -49,13 +49,9 @@ function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOr
       <button type="button" className="rw-home" onClick={()=>navigate('shop')} aria-label="Recon Water homepage"><BrandWordmark/></button>
       <nav id="rw-navigation" className={`rw-navigation ${mobileOpen ? 'rw-navigation-open' : ''}`} aria-label="Primary navigation">
         <button type="button" className={route==='shop'?'rw-nav-active':''} onClick={()=>goToSection('products')}>The product</button>
-        <button type="button" onClick={()=>goToSection('about')}>Our approach</button>
-        <button type="button" onClick={()=>goToSection('how')}>How it works</button>
       </nav>
       <div className="rw-header-actions">
-        {session
-          ? <button className="rw-account" type="button" onClick={()=>{loadOrders();setOrdersOpen(true);}}><UserRound size={17}/><span>My requests</span></button>
-          : <button className="rw-account" type="button" onClick={()=>setAuthOpen(true)}><UserRound size={17}/><span>Sign in</span></button>}
+        {session && <button className="rw-account" type="button" onClick={()=>{loadOrders();setOrdersOpen(true);}}><UserRound size={17}/><span>My requests</span></button>}
         <button className="rw-cart" type="button" aria-label={`Open cart${totalCount ? `, ${totalCount} items` : ''}`} onClick={()=>setCartOpen(true)}><ShoppingBag size={18}/>{totalCount>0&&<em>{totalCount}</em>}</button>
         <button type="button" className="rw-menu-button" aria-controls="rw-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen?'Close navigation':'Open navigation'} onClick={()=>setMobileOpen(!mobileOpen)}>{mobileOpen?<X size={21}/>:<Menu size={21}/>}</button>
       </div>
@@ -63,18 +59,10 @@ function SiteHeader({route, navigate, mobileOpen, setMobileOpen, session, loadOr
   </>;
 }
 
-function BrandAbout() {
-  return <section id="about" className="rw-about-section" aria-labelledby="rw-about-title"><div className="container rw-about-inner">
-    <div className="rw-about-number">RW / 001</div>
-    <div className="rw-about-copy"><div className="rw-kicker">THE RECON WATER APPROACH</div><h2 id="rw-about-title">Focused on what <em>matters.</em></h2><p>One place for essential product information, transparent request status, and a carefully organized customer experience. Our process is designed around clarity at each step.</p></div>
-    <div className="rw-about-aside"><span>01 — INFORMATION</span><span>02 — AVAILABILITY</span><span>03 — REVIEW</span></div>
-  </div></section>;
-}
-
 function SiteFooter({navigate}) {
   return <footer className="rw-footer"><div className="container rw-footer-inner">
     <div className="rw-footer-intro"><BrandWordmark inverse/><p>Clarity in every detail. An independent product information and request portal based in Ontario, Canada.</p></div>
-    <div className="rw-footer-col"><h3>Explore</h3><button onClick={()=>{navigate('shop');scrollToSection('products',75);}}>Product information <ArrowUpRight size={13}/></button><button onClick={()=>{navigate('shop');scrollToSection('how',75);}}>How it works <ArrowUpRight size={13}/></button><button onClick={()=>navigate('admin')}>Administration <ArrowUpRight size={13}/></button></div>
+    <div className="rw-footer-col"><h3>Explore</h3><button onClick={()=>{navigate('shop');scrollToSection('products',75);}}>Product information <ArrowUpRight size={13}/></button><button onClick={()=>navigate('admin')}>Administration <ArrowUpRight size={13}/></button></div>
     <div className="rw-footer-col"><h3>Product context</h3><p>CAD pricing, Canadian addresses, and individual request review. No online payment is collected through this site.</p><a href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noopener noreferrer">Manufacturer information <ArrowUpRight size={13}/></a></div>
   </div><div className="container rw-footer-bottom"><span>© {new Date().getFullYear()} Recon Water. Ontario, Canada.</span><span>Independent site · Not affiliated with or endorsed by Hospira or Pfizer.</span></div></footer>;
 }
@@ -82,8 +70,6 @@ function SiteFooter({navigate}) {
 function Notice({message,onClose}) { return message ? <div className={`toast ${message.type==='error'?'toast-error':''}`} role="status"><span>{message.type==='error'?<AlertCircle size={19}/>:<CheckCircle2 size={19}/>}</span><span>{message.text}</span><button className="icon-button" aria-label="Dismiss notice" onClick={onClose}><X size={16}/></button></div> : null; }
 function Field({label,children,hint}) { return <label className="field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>; }
 function Pill({children,type='neutral'}) {return <span className={`pill pill-${type}`}>{children}</span>;}
-function SimpleIcon({kind}) {return kind==='delivery'?<Truck size={23}/>:kind==='verified'?<ShieldCheck size={23}/>:<PackageCheck size={23}/>;}
-
 export default function App(){
   const [route,setRoute] = useState(window.location.pathname.startsWith('/admin')?'admin':'shop');
   const [products,setProducts]=useState(configured?[]:previewProducts);
@@ -128,19 +114,16 @@ export default function App(){
   const refreshAfterOrder=()=>{setCart({});setCheckoutOpen(false);loadOrders();loadProducts();};
   return <>
     <a className="rw-skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setAuthOpen={setAuthOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
+    <SiteHeader route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} session={session} loadOrders={loadOrders} setOrdersOpen={setOrdersOpen} setCartOpen={setCartOpen} totalCount={totalCount}/>
     {!configured&&<div className="setup-banner"><AlertCircle size={16}/> Demo mode — connect Supabase and set environment variables to activate the storefront and admin panel.</div>}
     {route==='shop'?<>
-      <main id="main-content"><HeroExperience product={heroProduct} inCartQty={heroProduct ? cart[heroProduct.id]||0 : 0} onAdd={add} onExplore={()=>scrollToSection('products')} onProcess={()=>scrollToSection('how')}/>
-      <section className="benefit-row"><div className="container benefit-grid">{[['verified','Review before fulfillment','Every order is reviewed individually.'],['delivery','Canadian requests','Ontario-based operations with Canadian delivery addresses.'],['stock','Inventory controlled','Stock updates after order approval.']].map(([icon,head,body])=><div className="benefit" key={head}><div className="benefit-icon"><SimpleIcon kind={icon}/></div><div><strong>{head}</strong><p>{body}</p></div></div>)}</div></section>
-      <section id="products" className="rw-products-section section" aria-labelledby="rw-products-heading"><div className="container">
-        <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div><span className="rw-products-counter">{products.length.toString().padStart(2,'0')} / PUBLISHED {products.length===1?'PRODUCT':'PRODUCTS'}</span></div>
-        {products.length===0 ? <div className="empty"><Box size={36}/><h3>No published products</h3><p>Publish a product in the admin panel to make it visible here.</p></div> : <div className="rw-experience-list">{products.slice().sort((a,b)=>Number(b.volume_ml===30 && /bacteriostatic/i.test(b.name))-Number(a.volume_ml===30 && /bacteriostatic/i.test(a.name))).map((p,index)=><ProductExperience key={p.id} product={p} index={index} inCartQty={cart[p.id]||0} onAdd={add} VialVisual={VialVisual}/>)}</div>}
+      <main id="main-content"><HeroExperience product={heroProduct} inCartQty={heroProduct ? cart[heroProduct.id]||0 : 0} onAdd={add} onExplore={()=>scrollToSection('products')}/>
+      <section id="products" className="rw-products-section" aria-labelledby="rw-products-heading"><div className="container">
+        <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div></div>
+        {products.length===0 ? <div className="empty"><Box size={36}/><h3>No published products</h3><p>Publish a product in the admin panel to make it visible here.</p></div> : <div className="rw-experience-list">{products.slice().sort((a,b)=>Number(b.volume_ml===30 && /bacteriostatic/i.test(b.name))-Number(a.volume_ml===30 && /bacteriostatic/i.test(a.name))).map(p=><ProductExperience key={p.id} product={p} inCartQty={cart[p.id]||0} onAdd={add} VialVisual={VialVisual}/>)}</div>}
         <div className="rw-product-disclaimer"><ShieldCheck size={19}/><p>Product details are provided for identification, not medical guidance. Price and availability do not establish eligibility for purchase. Request submission is not an order confirmation or payment. Supply and fulfillment must meet applicable Canadian laws.</p></div>
       </div></section>
-      <BrandAbout/>
-      <section id="how" className="section how"><div className="container"><div className="how-head"><div className="eyebrow subtle">A STRAIGHTFORWARD PROCESS</div><h2>Simple from selection<br/>to review.</h2></div><div className="steps">{[['01','Browse & select','Review products and quantities before submitting your request.'],['02','Submit a request','Sign in, select a Canadian province or territory, and send your request securely.'],['03','Manual review','An administrator verifies eligibility and availability before fulfillment.']].map(([n,t,b])=><div className="step" key={n}><span className="step-number">{n}</span><div className="step-icon">{n==='01'?<ShoppingBag/>:n==='02'?<ClipboardList/>:<BadgeCheck/>}</div><h3>{t}</h3><p>{b}</p></div>)}</div></div></section>
-      <section className="closing-cta"><div className="container closing-inner"><div><div className="eyebrow">CLEAR PROCESS. SECURE RECORDS.</div><h2>Everything in one place.</h2><p>View products, submit requests, and track your order status.</p></div><button className="btn btn-white" onClick={()=>scrollToSection('products')}>View product <ArrowRight size={18}/></button></div></section></main>
+      </main>
     </>:<React.Suspense fallback={<main id="main-content" className="rw-route-loading" role="status">Loading administration…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={toast} onSignOut={logout} reloadPublic={loadProducts}/></React.Suspense>}
     <SiteFooter navigate={navigate}/>
     <Notice message={notice} onClose={()=>setNotice(null)}/>

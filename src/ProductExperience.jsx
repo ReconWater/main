@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import { ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, ImageIcon, Info, Minus, Plus, ShieldCheck, ShoppingBag, X, ZoomIn } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, ImageIcon, Info, Minus, Plus, ShoppingBag, X, ZoomIn } from 'lucide-react';
 import { configured, money } from './supabase';
 import { RECON_PRODUCT_MEDIA } from './productMedia';
 import { maxOrderable } from './productQuantity';
@@ -37,7 +37,7 @@ function QuantityControl({value,maximum,onChange}){
   </div>;
 }
 
-export default function ProductExperience({product,index,inCartQty,onAdd,VialVisual}){
+export default function ProductExperience({product,inCartQty,onAdd,VialVisual}){
   const [active,setActive]=useState(0);
   const [quantity,setQuantity]=useState(1);
   const [zoomOpen,setZoomOpen]=useState(false);
@@ -79,7 +79,7 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
   },[zoomOpen,gallery.length]);
   return <article className="rw-p2-shell" aria-labelledby={`rw-p2-name-${product.id}`}>
     <div className="rw-p2-gallery">
-      <div className="rw-p2-gallery-top"><span>RECON WATER / {String(index+1).padStart(2,'0')}</span><span>{product.volume_ml ? `${product.volume_ml} ML`:'PRODUCT'} · CAD</span></div>
+      <div className="rw-p2-gallery-top"><span>{product.volume_ml ? `${product.volume_ml} ML`:'PRODUCT'} · CAD</span></div>
       <button type="button" className="rw-p2-main-image" onClick={()=>setZoomOpen(true)} aria-label={`Enlarge ${current.label} of ${product.name}`}>
         <ProductArtwork product={product} view={current} VialVisual={VialVisual}/>
         <span className="rw-p2-zoom"><ZoomIn size={16}/> Enlarge view</span>
@@ -88,7 +88,7 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
         {gallery.map((view,i)=><button type="button" className={`rw-p2-thumb ${active===i?'is-selected':''}`} onClick={()=>setActive(i)} aria-pressed={active===i} aria-label={`Show ${view.label}`} key={view.id}>
           <span>{view.src ? <img src={view.src} alt="" loading="lazy" decoding="async" fetchPriority="low"/> : view.id==='detail' ? <FileText size={21}/> : <ImageIcon size={21}/>}</span><small>{view.label}</small>
         </button>)}
-      </div><span className="rw-p2-view-counter">{String(active+1).padStart(2,'0')} / 03</span></div>
+      </div></div>
       <p className="rw-p2-photo-note"><Info size={14}/>{gallery.some(v=>v.src)?'Photos supplied by the operator; verify imagery against actual stock.':'Gallery contains concept artwork until verified product photographs are added.'}</p>
     </div>
     <div className="rw-p2-details">
@@ -100,7 +100,6 @@ export default function ProductExperience({product,index,inCartQty,onAdd,VialVis
         <div className="rw-p2-price-bar"><div><span>UNIT PRICE · CAD</span><strong className={hasPrice?'':'rw-p2-price-pending'}>{money(product.price_cents)}</strong><small>{hasPrice?'Price per vial. Taxes and delivery reviewed separately.':'The operator has not published a price.'}</small></div><div className="rw-p2-stock-text">{hasStock?<><Check size={16}/><span>{isLow?'Limited inventory':'Inventory available'}<small>Subject to request review</small></span></>:<><Info size={17}/><span>Currently unavailable<small>Check back for updates</small></span></>}</div></div>
         <div className="rw-p2-order-controls"><div className="rw-p2-stepper-wrap"><label>QUANTITY</label><QuantityControl value={requested} maximum={remaining} onChange={setQuantity}/></div><button type="button" className="rw-p2-add" disabled={!available} onClick={()=>onAdd(product,requested)}><ShoppingBag size={19}/>{available?'Add to request cart':!configured?'Setup required':'Currently unavailable'}<ArrowRight size={18}/></button></div>
         <div className="rw-p2-subtotal"><span>Estimated product subtotal</span><strong>{hasPrice?money(product.price_cents*requested):'—'}</strong></div>
-        <p className="rw-p2-request-note"><ShieldCheck size={17}/> No online payment is collected. Submission starts a review; it does not confirm a sale or reserve inventory.</p>
       </div>
       <div className="rw-p2-info-list"><div><span><Check size={16}/> Prices in Canadian dollars</span><span><Check size={16}/> Ontario-based operation</span></div><div><span><Check size={16}/> Manual fulfillment review</span><span><Check size={16}/> Account request history</span></div></div>
       <a className="rw-p2-manufacturer" href="https://www.pfizermedicalinformation.com/bacteriostatic-water" target="_blank" rel="noreferrer noopener">Manufacturer product information <ArrowUpRight size={15}/></a>

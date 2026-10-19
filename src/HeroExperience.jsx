@@ -11,7 +11,7 @@ import './hero.css';
  * the product detail section. The add action is the existing cart handler.
  * No generated/fictional manufacturer packaging is displayed.
  */
-export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplore, onProcess }) {
+export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplore }) {
   const [quantity, setQuantity] = useState(1);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -48,7 +48,6 @@ export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplor
           <p className="rw-bac-intro">One product, clearly presented. Explore the product details, see published Canadian pricing, and submit a request for individual review.</p>
           <div className="rw-bac-actions">
             <button className="rw-bac-primary" type="button" onClick={onExplore}>Explore the product <ArrowUpRight size={18} aria-hidden="true" /></button>
-            <button className="rw-bac-secondary" type="button" onClick={onProcess}>How requests work <ArrowRight size={17} aria-hidden="true" /></button>
           </div>
           <div className="rw-bac-proofs" aria-label="Site information">
             <span><MapPin size={16} aria-hidden="true" /> Ontario based</span>
@@ -57,10 +56,6 @@ export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplor
         </div>
 
         <div className="rw-bac-card" aria-label="Hospira 30 mL product and request information">
-          <div className="rw-bac-card-header">
-            <span>SINGLE PRODUCT / 30 ML</span>
-            <span className="rw-bac-card-symbol"><Droplet size={18} aria-hidden="true" /></span>
-          </div>
           <div className="rw-bac-card-visual">
             {photoAvailable ? (
               <img src={RECON_PRODUCT_MEDIA.front} alt="Hospira 30 mL bacteriostatic water vial photographed by Recon Water" decoding="async" loading="eager" fetchPriority="high" onError={() => setImageFailed(true)} />
@@ -90,7 +85,6 @@ export default function HeroExperience({ product, inCartQty = 0, onAdd, onExplor
             </div>
             <p className="rw-bac-request-note"><Check size={15} aria-hidden="true" /> No payment collected online. Requests require approval.</p>
           </div>
-          {!photoAvailable && <span className="rw-bac-photo-note">Typographic representation · not manufacturer packaging</span>}
         </div>
       </div>
       <div className="container rw-bac-foot"><span>RECON WATER · INDEPENDENT CANADIAN WEBSITE</span><button type="button" onClick={onExplore}>PRODUCT DETAILS <ArrowRight size={15} aria-hidden="true" /></button></div>

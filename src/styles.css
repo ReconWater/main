@@ -48,30 +48,6 @@ p{line-height:1.72}
 .art-deco{position:absolute;width:6px;height:6px;border:1px solid #afcdc2;transform:rotate(45deg)}
 .art-deco-a{left:13%;top:38%}
 .art-deco-b{right:14%;bottom:22%}
-.benefit-row{border-bottom:1px solid #e6eeeb}
-.benefit-grid{display:grid;grid-template-columns:repeat(3,1fr)}
-.benefit{display:flex;align-items:center;gap:16px}
-.benefit-icon{border:1px solid #e0eeea;display:grid;place-items:center}
-.benefit strong{font-weight:800}
-.benefit p{margin:5px 0 0;color:#80908e;font-size:11px;line-height:1.4}
-.section{padding:87px 0}
-.how-head h2{font-size:clamp(32px,3.5vw,45px);color:#1b393f;margin:13px 0 7px}
-.period{color:#169485}
-.how{background:#f3f7f4}
-.how-head{text-align:center;margin-bottom:41px}
-.how-head .eyebrow{justify-content:center}
-.how-head h2{line-height:1.28}
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:25px}
-.step{background:#fff;border:1px solid #e0e9e4;border-radius:13px;padding:33px;min-height:260px;position:relative}
-.step-number{position:absolute;right:25px;top:26px;font-size:29px;font-weight:800;color:#e1eeea;font-family:Manrope,sans-serif}
-.step-icon{height:50px;width:50px;background:#eaf5f0;border-radius:13px;color:#1a776e;display:grid;place-items:center;margin-bottom:29px}
-.step h3{font-size:18px;color:#1e4245;margin-bottom:11px}
-.step p{font-size:12px;color:#82918d;margin:0}
-.closing-cta{color:#fff;padding:62px 0}
-.closing-inner{display:flex;align-items:center;justify-content:space-between;gap:30px}
-.closing-cta .eyebrow{color:#85c7bd}
-.closing-cta h2{margin:12px 0}
-.closing-cta p{color:#b0cfca;font-size:13px;margin:0}
 .pill{white-space:nowrap;display:inline-flex;align-items:center;gap:5px;border-radius:50px;font-size:9px;letter-spacing:.06em;font-weight:800;text-transform:uppercase;padding:7px 10px}
 .pill-available{background:#e1f3e8;color:#237657}
 .pill-muted{background:#e9efec;color:#718580}
@@ -147,17 +123,10 @@ p{line-height:1.72}
 @media (max-width:760px) {
 
 .container{padding:0 18px}
-.benefit-grid{grid-template-columns:1fr;gap:23px}
-.section{padding:60px 0}
-.steps{grid-template-columns:1fr;gap:15px}
-.step{min-height:0;padding:25px}
-.step-icon{margin-bottom:17px}
-.closing-inner{align-items:start;flex-direction:column}
 .modal{padding:26px;max-height:90vh}
 }
 @media (max-width:480px) {
 
-.benefit{gap:12px}
 .result-count{font-size:10px}
 .two-col{gap:10px}
 }
@@ -208,15 +177,6 @@ html{scroll-padding-top:108px}
 .rw-button-primary:hover{background:#1c5360;box-shadow:0 17px 30px #102b3535}
 .rw-button-link{background:transparent;padding-left:6px;padding-right:6px;color:#25454d;min-height:45px;border-radius:0;border-bottom:1px solid #a5b9b6}
 .rw-button-link:hover{color:#16706e}
-.rw-about-section{background:#102b35;color:#fff;scroll-margin-top:88px}
-.rw-about-inner{padding-top:85px;padding-bottom:85px;display:grid;grid-template-columns:1fr 3fr 1.05fr;align-items:start;gap:45px}
-.rw-about-number{font-family:'DM Serif Display',Georgia,serif;font-size:20px;color:#91b0ad}
-.rw-about-copy .rw-kicker{color:#c7a775}
-.rw-about-copy h2{font-family:'DM Serif Display',Georgia,serif;font-weight:400;font-size:clamp(36px,4.6vw,65px);line-height:1.05;margin:22px 0;letter-spacing:-.035em;color:white}
-.rw-about-copy h2 em{font-weight:400;color:#9ecac3}
-.rw-about-copy p{max-width:620px;color:#bbcdce;font-size:14px;line-height:1.9;margin:0}
-.rw-about-aside{display:flex;flex-direction:column;gap:17px;margin-top:48px;padding-top:10px;border-top:1px solid #537079}
-.rw-about-aside span{font-size:10px;letter-spacing:.12em;font-weight:700;color:#c4d8d5}
 .rw-footer{background:#0b252e;color:#abc2c5}
 .rw-footer-inner{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,.85fr) minmax(0,1.3fr);gap:clamp(30px,6vw,90px);padding-top:78px;padding-bottom:74px}
 .rw-footer-intro p{max-width:360px;color:#9fb6b8;font-size:13px;line-height:1.85;margin:26px 0 0}
@@ -225,18 +185,9 @@ html{scroll-padding-top:108px}
 .rw-footer-col button:hover,.rw-footer-col a:hover{color:#fff}
 .rw-footer-col p{font-size:12px;line-height:1.85;margin:0 0 16px}
 .rw-footer-bottom{border-top:1px solid #35515a;display:flex;justify-content:space-between;gap:20px;padding-top:23px;padding-bottom:28px;color:#88a7aa;font-size:11px;line-height:1.6}
-/* Shared, light-touch refinements: keep existing product and admin functionality. */
-.benefit-row{background:#fcfefd}
-.benefit-grid{padding-top:39px;padding-bottom:39px;gap:27px}
-.benefit-icon{border-radius:50%;height:51px;width:51px;color:#1c6869;background:#eff7f3}
-.benefit strong{color:#183b44;font-size:13px}
-.closing-cta{background:linear-gradient(120deg,#184953,#0b2a34)}
-.closing-cta h2{font-family:'DM Serif Display',Georgia,serif;font-weight:400;letter-spacing:-.025em;font-size:clamp(31px,3.5vw,45px)}
 @media(max-width:1050px){
   .rw-header-inner{gap:18px}
   .rw-navigation{gap:20px}
-  .rw-about-inner{grid-template-columns:1fr 3fr;gap:20px}
-  .rw-about-aside{grid-column:2;flex-direction:row;margin-top:0;justify-content:space-between;gap:10px}
   .rw-footer-inner{gap:30px}
 }
 @media(max-width:760px){
@@ -255,8 +206,6 @@ html{scroll-padding-top:108px}
   .rw-account{border:0;padding:11px;background:none}
   .rw-account span{display:none}
   .rw-menu-button{display:flex}
-  .rw-about-inner{padding-top:60px;padding-bottom:65px;display:flex;flex-direction:column;gap:21px}
-  .rw-about-aside{width:100%;margin:0;flex-wrap:wrap;gap:10px}
   .rw-footer-inner{grid-template-columns:repeat(2,minmax(0,1fr));gap:34px;padding-top:55px;padding-bottom:50px}
   .rw-footer-intro{grid-column:1 / -1}
   .rw-footer-bottom{flex-direction:column;gap:8px}
@@ -281,10 +230,6 @@ html{scroll-padding-top:108px}
 .rw-skip-link{position:fixed;left:12px;top:12px;z-index:400;padding:12px 18px;background:#102b35;color:#fff;border-radius:8px;transform:translateY(-180%)}
 .rw-skip-link:focus{transform:none}
 .rw-route-loading{min-height:65vh;display:grid;place-items:center;color:#315861;font-weight:700}
-/* Browser may skip layout/paint for distant editorial sections while preserving natural scroll. */
-@supports (content-visibility:auto){
-  .rw-about-section,.how,.closing-cta{content-visibility:auto;contain-intrinsic-size:auto 440px}
-}
 @media (max-width:760px){
   .rw-menu-button,.rw-cart,.rw-account{min-width:44px;min-height:44px}
   .rw-navigation button{min-height:48px}
