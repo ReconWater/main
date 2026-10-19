@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDown, MapPin, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, SlidersHorizontal, Sparkles, Truck, UserRound, Warehouse, X, AlertCircle, RefreshCcw, Save, PencilLine, Clock, Trash2 } from 'lucide-react';
+import { Activity, ArrowLeft, ArrowRight, ArrowUpRight, ArrowDown, MapPin, BadgeCheck, Box, Check, CheckCircle2, ChevronDown, ClipboardList, CreditCard, Droplets, FileText, HeartPulse, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu, Minus, Package, PackageCheck, Plus, Search, ShieldCheck, ShoppingBag, Sparkles, Truck, UserRound, Warehouse, X, AlertCircle, RefreshCcw, Save, PencilLine, Clock, Trash2 } from 'lucide-react';
 import { supabase, configured, callApi, money } from './supabase';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
+import ProductExperience from './ProductExperience';
+import { RECON_PRODUCT_MEDIA } from './productMedia';
+import { maxOrderable, nextCartQuantity, MAX_REQUEST_UNITS } from './productQuantity';
 
 const previewProducts = [{ id:'preview',sku:'BW-30ML',name:'Bacteriostatic Water for Injection USP',description:'30 mL multiple-dose vial. Availability and eligibility subject to review.',volume_ml:30,price_cents:null,stock_quantity:0,low_stock_threshold:5,is_active:true }];
 const statusLabel = { pending_review:'Pending review', approved:'Approved', fulfilled:'Fulfilled', cancelled:'Cancelled' };
@@ -68,12 +71,12 @@ function HomepageHero({onExplore,onProcess}) {
       <div className="rw-hero-stage">
         <div className="rw-stage-grain" aria-hidden="true"/>
         <div className="rw-stage-head"><span className="rw-stage-index">01 / PRODUCT FOCUS</span><span className="rw-stage-circle"><ArrowUpRight size={16}/></span></div>
-        <div className="rw-stage-vial"><VialVisual large/></div>
+        <div className="rw-stage-vial">{RECON_PRODUCT_MEDIA.front ? <img className="rw-stage-photo" src={RECON_PRODUCT_MEDIA.front} alt="Hospira 30 mL bacteriostatic water vial, actual product photograph" onError={(e)=>{e.currentTarget.hidden=true; e.currentTarget.nextElementSibling.hidden=false;}}/> : null}<div hidden={!!RECON_PRODUCT_MEDIA.front}><VialVisual large/></div></div>
         <div className="rw-stage-footer">
           <div><span className="rw-stage-category">BACTERIOSTATIC WATER FOR INJECTION USP</span><strong>30 mL <span>multi-dose vial</span></strong></div>
           <span className="rw-stage-cross" aria-hidden="true">✳</span>
         </div>
-        <p className="rw-stage-caveat">Concept illustration · Actual packaging and labeling may differ.</p>
+        <p className="rw-stage-caveat">{RECON_PRODUCT_MEDIA.front ? "Photograph supplied by Recon Water · Verify product packaging before publication." : "Concept illustration · Actual packaging and labeling may differ."}</p>
       </div>
     </div>
     <div className="container rw-hero-end"><span>PRODUCT INFORMATION, REFINED</span><span>SCROLL TO EXPLORE <ArrowDown size={14}/></span></div>
@@ -128,8 +131,8 @@ export default function App(){
   const inCart=products.filter(p=>cart[p.id]>0);
   const totalCount=inCart.reduce((n,p)=>n+cart[p.id],0);
   const subtotal=inCart.reduce((n,p)=>n+(p.price_cents||0)*cart[p.id],0);
-  const add=(p)=>{if(p.price_cents==null || p.stock_quantity<1 || !configured){toast('This item is not ready for ordering.','error');return;}setCart(c=>({...c,[p.id]:Math.min(p.stock_quantity,(c[p.id]||0)+1)}));setCartOpen(true);};
-  const qty=(p,delta)=>setCart(c=>({...c,[p.id]:Math.max(0,Math.min(p.stock_quantity,(c[p.id]||0)+delta))}));
+  const add=(p,requested=1)=>{if(p.price_cents==null || p.stock_quantity<1 || !configured){toast('This item is not ready for ordering.','error');return;}if(maxOrderable(p.stock_quantity,cart[p.id]||0)===0){toast('The available quantity is already in your cart.','error');setCartOpen(true);return;}setCart(c=>({...c,[p.id]:nextCartQuantity(p.stock_quantity,c[p.id]||0,requested)}));setCartOpen(true);};
+  const qty=(p,delta)=>setCart(c=>({...c,[p.id]:Math.max(0,Math.min(MAX_REQUEST_UNITS,p.stock_quantity,(c[p.id]||0)+delta))}));
   const beginCheckout=()=>{setCartOpen(false);if(!session){setAuthOpen(true);toast('Sign in or create a verified account before submitting an order request.');return;}setCheckoutOpen(true);};
   const logout=async()=>{await supabase?.auth.signOut();setCart({});setMyOrders([]);toast('Signed out');};
   const refreshAfterOrder=()=>{setCart({});setCheckoutOpen(false);loadOrders();loadProducts();};
@@ -139,12 +142,14 @@ export default function App(){
     {route==='shop'?<>
       <main><HomepageHero onExplore={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})} onProcess={()=>document.getElementById('how')?.scrollIntoView({behavior:'smooth'})}/>
       <section className="benefit-row"><div className="container benefit-grid">{[['verified','Review before fulfillment','Every order is reviewed individually.'],['delivery','Canadian requests','Ontario-based operations with Canadian delivery addresses.'],['stock','Inventory controlled','Stock updates after order approval.']].map(([icon,head,body])=><div className="benefit" key={head}><div className="benefit-icon"><SimpleIcon kind={icon}/></div><div><strong>{head}</strong><p>{body}</p></div></div>)}</div></section>
-      <section id="products" className="section catalog"><div className="container"><div className="section-head"><div><div className="eyebrow subtle">PRODUCT INFORMATION</div><h2>Our focus<span className="period">.</span></h2><p>Product details, CAD pricing, and availability in one place.</p></div><div className="result-count"><SlidersHorizontal size={17}/> {products.length} {products.length===1?'product':'products'}</div></div>
-      {products.length===0?<div className="empty"><Box size={36}/><h3>No published Canadian products</h3><p>Use the admin panel to publish the first product.</p></div>:<div className="product-grid">{products.map(p=><article className="product-card" key={p.id}><div className="product-photo"><div className="product-topline"><Pill type={p.stock_quantity>0?'available':'muted'}>{p.stock_quantity>0?'AVAILABLE':'UNAVAILABLE'}</Pill><span>{p.volume_ml?`${p.volume_ml} mL`:p.sku}</span></div><VialVisual/></div><div className="product-body"><div className="product-meta">PRODUCT · {p.sku}</div><h3>{p.name}</h3><p>{p.description}</p><div className="product-bottom"><div><small>UNIT PRICE · CAD</small><strong>{money(p.price_cents)}</strong></div><button className="btn btn-small btn-primary" onClick={()=>add(p)} disabled={!configured || p.stock_quantity<1 || p.price_cents==null}>{p.stock_quantity>0 && p.price_cents!=null?'Add to cart':'Not available'} <ArrowRight size={16}/></button></div></div></article>)}</div>}
-      <div className="disclaimer"><ShieldCheck size={20}/><p>Product details are provided for identification only, not medical guidance. Supply, customer eligibility, shipping, and fulfillment must meet applicable laws. Nothing on this site authorizes use or sale of a regulated product.</p></div></div></section>
+      <section id="products" className="rw-products-section section" aria-labelledby="rw-products-heading"><div className="container">
+        <div className="rw-products-intro"><div><div className="rw-kicker"><span className="rw-kicker-line"/> THE PRODUCT / A CLOSER LOOK</div><h2 id="rw-products-heading">The essentials, <em>precisely presented.</em></h2><p>Verified product information, current CAD pricing, and availability from our inventory system.</p></div><span className="rw-products-counter">{products.length.toString().padStart(2,'0')} / PUBLISHED {products.length===1?'PRODUCT':'PRODUCTS'}</span></div>
+        {products.length===0 ? <div className="empty"><Box size={36}/><h3>No published products</h3><p>Publish a product in the admin panel to make it visible here.</p></div> : <div className="rw-experience-list">{products.slice().sort((a,b)=>Number(b.volume_ml===30 && /bacteriostatic/i.test(b.name))-Number(a.volume_ml===30 && /bacteriostatic/i.test(a.name))).map((p,index)=><ProductExperience key={p.id} product={p} index={index} inCartQty={cart[p.id]||0} onAdd={add} VialVisual={VialVisual}/>)}</div>}
+        <div className="rw-product-disclaimer"><ShieldCheck size={19}/><p>Product details are provided for identification, not medical guidance. Price and availability do not establish eligibility for purchase. Request submission is not an order confirmation or payment. Supply and fulfillment must meet applicable Canadian laws.</p></div>
+      </div></section>
       <BrandAbout/>
       <section id="how" className="section how"><div className="container"><div className="how-head"><div className="eyebrow subtle">A STRAIGHTFORWARD PROCESS</div><h2>Simple from selection<br/>to review.</h2></div><div className="steps">{[['01','Browse & select','Review products and quantities before submitting your request.'],['02','Submit a request','Sign in, select a Canadian province or territory, and send your request securely.'],['03','Manual review','An administrator verifies eligibility and availability before fulfillment.']].map(([n,t,b])=><div className="step" key={n}><span className="step-number">{n}</span><div className="step-icon">{n==='01'?<ShoppingBag/>:n==='02'?<ClipboardList/>:<BadgeCheck/>}</div><h3>{t}</h3><p>{b}</p></div>)}</div></div></section>
-      <section className="closing-cta"><div className="container closing-inner"><div><div className="eyebrow">CLEAR PROCESS. SECURE RECORDS.</div><h2>Everything in one place.</h2><p>View products, submit requests, and track your order status.</p></div><button className="btn btn-white" onClick={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})}>Browse catalogue <ArrowRight size={18}/></button></div></section></main>
+      <section className="closing-cta"><div className="container closing-inner"><div><div className="eyebrow">CLEAR PROCESS. SECURE RECORDS.</div><h2>Everything in one place.</h2><p>View products, submit requests, and track your order status.</p></div><button className="btn btn-white" onClick={()=>document.getElementById('products')?.scrollIntoView({behavior:'smooth'})}>View product <ArrowRight size={18}/></button></div></section></main>
     </>:<AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={toast} onSignOut={logout} reloadPublic={loadProducts}/>}
     <SiteFooter navigate={navigate}/>
     <Notice message={notice} onClose={()=>setNotice(null)}/>
