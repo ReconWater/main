@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
-import {Activity,ArrowRight,ArrowUpRight,Check,ChevronDown,ClipboardCheck,ClipboardList,Droplet,FileText,Info,Lock,LogOut,Menu,Minus,Package,PackageCheck,Plus,ShieldCheck,ShoppingBag,Truck,UserRound,X} from 'lucide-react';
-import {supabase,configured,callApi,money} from './supabase';
+import {ArrowRight,Check,ChevronDown,Droplet,Lock,LogOut,Menu,Minus,Plus,ShoppingBag,UserRound,X} from 'lucide-react';
+import {supabase,callApi,money} from './supabase';
 import {CANADIAN_PROVINCES,formatCanadianPostal} from './canada';
 import ClinicalGallery from './ClinicalGallery';
 import {useDialogFocus} from './useDialogFocus';
@@ -15,75 +15,73 @@ const cartCountVials=vialCount;
 function Brand(){return <span className="brand"><span className="brand-logo"><Droplet size={24} strokeWidth={1.65}/></span><span className="brand-words"><strong>RECON<span>WATER</span></strong><small>ONTARIO · CANADA</small></span></span>}
 function Notice({message,clear}){return message?<div className={`notice ${message.error?'is-error':''}`} role="status"><span>{message.text}</span><button aria-label="Dismiss message" onClick={clear}><X size={17}/></button></div>:null}
 function Field({label,children}){return <label className="form-field"><span>{label}</span>{children}</label>}
-function MainShop({product,packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd}){
+function MainShop({packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd}){
+ const [expanded,setExpanded]=useState(null);
  const chosen=packages.find(p=>p.id===selected)||packages[0];
- const {remaining}=formatAvailability(chosen,cart,stock);
- const effectiveQty=Math.min(Math.max(1,packQty),Math.max(1,remaining));
+ const {remaining,inCart}=formatAvailability(chosen,cart,stock);
+ const amount=Math.min(Math.max(1,packQty),Math.max(1,remaining));
  const available=isRequestable(chosen,{remaining});
- const sub=chosen?money(chosen.price_cents):'Pricing pending';
- const perVial=chosen?.price_cents?money(Math.round(chosen.price_cents/chosen.vials_per_pack)):'—';
- return <main id="main-content">
-  <section id="product" className="clinical-hero"><div className="container">
-    <div className="clinical-breadcrumb"><span>RECON WATER</span><span aria-hidden="true">/</span><strong>HOSPIRA · 30 ML</strong></div>
-    <div className="clinical-hero-grid">
-      <div className="clinical-hero-media"><ClinicalGallery/></div>
-      <div className="clinical-hero-info">
-        <div className="clinical-kicker"><span className="clinical-live-dot"/> SINGLE PRODUCT · THREE PACKAGING FORMATS</div>
-        <h1>Bacteriostatic Water <span>for Injection USP</span></h1>
-        <p className="clinical-subtitle">Hospira / Pfizer Canada · 30 mL multi-dose vial</p>
-        <p className="clinical-description">Verified product information, package-level CAD pricing, and review-based requests. One product, presented with clinical clarity.</p>
-        <div className="clinical-specs" aria-label="Product specifications"><div><span>VOLUME</span><strong>30 mL / vial</strong></div><div><span>PRODUCT ID</span><strong>DIN 00038202*</strong></div><div><span>LOCATION</span><strong>Ontario, Canada</strong></div></div>
-        <div className="clinical-select-title"><div><span className="clinical-kicker">01 / PACKAGE SELECTION</span><h2>Choose a format</h2></div><span className="clinical-format-help">Prices per package · CAD</span></div>
-        <fieldset className="clinical-packages"><legend className="visually-hidden">Choose a packaging format</legend>
-          {packages.length?packages.map(p=><label key={p.id} className={`clinical-package ${chosen?.id===p.id?'is-selected':''}`}>
-            <input type="radio" name="clinical-package" checked={chosen?.id===p.id} onChange={()=>{setSelected(p.id);setPackQty(1)}}/>
-            <span className="clinical-package-radio" aria-hidden="true"/>
-            <span className="clinical-package-copy"><strong>{p.code==='single'?'Single vial':p.code==='ten'?'10-vial bundle':'Factory-sealed case'}</strong><small>{p.code==='case'?'25 × 30 mL · unopened manufacturer case':p.code==='ten'?'10 × 30 mL · assembled from one lot':'1 × 30 mL · individual vial'}</small></span>
-            <span className="clinical-package-pricing"><strong>{p.price_cents?money(p.price_cents):'Pricing pending'}</strong><small>{Math.max(0,p.available_packages||0)} format{p.available_packages===1?'':'s'} available</small></span>
-          </label>):<div className="clinical-packages-empty">Package information is being configured. Ordering will be available after pricing and eligible inventory are published.</div>}
-        </fieldset>
-        {chosen&&<div className="clinical-purchase">
-          <div className="clinical-purchase-price"><div><span>SELECTED PACKAGE / CAD</span><strong>{sub}</strong><small>{chosen.vials_per_pack} vial{chosen.vials_per_pack!==1?'s':''} · {chosen.price_cents?`${perVial} per-vial equivalent`:'Price not published'}</small></div><div className={`clinical-stock-status ${available?'is-available':''}`}><span className="clinical-status-dot"/>{!chosen.active?'Requests disabled':!chosen.price_cents?'Pricing pending':!getAvailable(chosen)?'Currently unavailable':remaining===0?'Request limit reached':'Available for review'}</div></div>
-          <div className="clinical-purchase-actions"><div className="clinical-quantity" role="group" aria-label="Number of selected packages"><button type="button" aria-label="Decrease package quantity" disabled={!available||effectiveQty<=1} onClick={()=>setPackQty(Math.max(1,effectiveQty-1))}><Minus size={18}/></button><output aria-label="Package quantity">{effectiveQty}</output><button type="button" aria-label="Increase package quantity" disabled={!available||effectiveQty>=remaining} onClick={()=>setPackQty(Math.min(remaining,effectiveQty+1))}><Plus size={18}/></button></div><button className="primary-button clinical-add-button" type="button" disabled={!available} onClick={()=>onAdd(chosen,effectiveQty)}><ShoppingBag size={18}/> Add to request <ArrowRight size={18}/></button></div>
-          <p className="clinical-order-note"><ShieldCheck size={16}/> Requests are reviewed. No payment is collected or stock reserved at submission.</p>
+ const total=chosen?.price_cents?money(chosen.price_cents*amount):'Price pending';
+ const physicalVials=(chosen?.vials_per_pack||0)*amount;
+ const isReady=packages.length>0;
+ const show=panel=>setExpanded(current=>current===panel?null:panel);
+ const packNames={single:'Single vial',ten:'10 vials',case:'Sealed case'};
+ return <main id="main-content" className="minimal-main">
+  <section id="product" className="clinical-hero"><div className="container clinical-hero-grid">
+    <div className="clinical-hero-media"><ClinicalGallery/></div>
+    <div className="clinical-hero-info">
+      <div className="clinical-kicker">HOSPIRA / PFIZER · 30 ML</div>
+      <h1>Bacteriostatic Water <span>for Injection USP</span></h1>
+      <p className="clinical-subtitle">30 mL multi-dose vial · Ontario, Canada</p>
+      <div className="clinical-select-title"><h2>Select packaging</h2><span>CAD</span></div>
+      <fieldset className="clinical-packages"><legend className="visually-hidden">Packaging format</legend>
+        {isReady?packages.map(p=><label className={`clinical-package ${chosen?.id===p.id?'is-selected':''}`} key={p.id}>
+          <input type="radio" name="clinical-package" checked={chosen?.id===p.id} onChange={()=>{setSelected(p.id);setPackQty(1)}}/>
+          <span className="clinical-package-check" aria-hidden="true"><Check size={14}/></span>
+          <strong>{packNames[p.code]||p.label}</strong>
+          <small>{p.vials_per_pack} × 30 mL{p.code==='case'?' · factory sealed':''}</small>
+          <span className="clinical-package-price">{p.price_cents?money(p.price_cents):'—'}</span>
+        </label>):<div className="clinical-packages-empty">Packaging and prices have not been published yet.</div>}
+      </fieldset>
+      {chosen&&<div className="clinical-purchase">
+        <div className="clinical-purchase-price" aria-live="polite">
+          <div><span>ESTIMATED PRODUCT SUBTOTAL</span><strong>{total}</strong><small>{physicalVials} vial{physicalVials!==1?'s':''} · {amount} package{amount!==1?'s':''}</small></div>
+          <span className={`clinical-stock-status ${available?'is-available':''}`}>
+            <span className="clinical-status-dot"/>{!chosen.active?'Unavailable':!chosen.price_cents?'Pricing pending':!getAvailable(chosen)?'Unavailable':remaining===0?'Limit reached':'Available for review'}
+          </span>
+        </div>
+        <div className="clinical-purchase-actions">
+          <div className="clinical-quantity" role="group" aria-label="Package quantity">
+            <button type="button" aria-label="Decrease package quantity" disabled={!available||amount<=1} onClick={()=>setPackQty(Math.max(1,amount-1))}><Minus size={17}/></button>
+            <output aria-label="Package quantity">{amount}</output>
+            <button type="button" aria-label="Increase package quantity" disabled={!available||amount>=remaining} onClick={()=>setPackQty(Math.min(remaining,amount+1))}><Plus size={17}/></button>
+          </div>
+          <button className="primary-button clinical-add-button" type="button" disabled={!available} onClick={()=>onAdd(chosen,amount)}>Add to request <ArrowRight size={18}/></button>
+        </div>
+        {inCart>0&&<p className="clinical-cart-count"><Check size={14}/> {inCart} of this format already in your request cart</p>}
+        <p className="clinical-order-note">Requests are reviewed before confirmation. No payment is collected online.</p>
+      </div>}
+      <div className="clinical-quick-info" id="details">
+        <button type="button" aria-expanded={expanded==='specs'} aria-controls="rw-specifications" onClick={()=>show('specs')}>Product details <ChevronDown size={17}/></button>
+        {expanded==='specs'&&<div id="rw-specifications" className="clinical-quick-panel">
+          <dl><div><dt>Manufacturer</dt><dd>Hospira / Pfizer Canada</dd></div><div><dt>Volume</dt><dd>30 mL per vial</dd></div><div><dt>DIN</dt><dd>00038202*</dd></div><div><dt>Packages</dt><dd>Single vial, 10-vial bundle, 25-vial factory-sealed case</dd></div></dl>
+          <p>*Confirm the DIN against your actual Canadian product label.</p>
         </div>}
-        <p className="clinical-identification-note">*DIN and manufacturer identity must be checked against the actual supplied Canadian product label before fulfillment.</p>
+        <button type="button" aria-expanded={expanded==='requests'} aria-controls="rw-ordering" onClick={()=>show('requests')}>How requests work <ChevronDown size={17}/></button>
+        {expanded==='requests'&&<div id="rw-ordering" className="clinical-quick-panel">
+          <p>Choose a format, sign in, and submit your Canadian delivery details. An administrator reviews eligibility and available inventory before confirmation.</p>
+          <p>Ten-vial bundles are assembled from one lot. Full cases are factory-sealed and tracked separately.</p>
+        </div>}
       </div>
     </div>
   </div></section>
-  <div className="credibility-strip"><div className="container credibility-inner"><span><PackageCheck size={19}/> Lot-tracked availability</span><span><ShieldCheck size={19}/> Admin-reviewed requests</span><span><Truck size={19}/> Canadian address validation</span></div></div>
-  <section id="details" className="content-section"><div className="container section-columns"><div className="section-intro"><span className="section-eyebrow">02 / PRODUCT DETAILS</span><h2>Designed around<br/>the essentials.</h2><p>Accurate packaging descriptions, transparent ordering terms and manufacturer information — without unnecessary claims.</p></div><div className="detail-panel">
-    <div className="detail-row"><span>Product</span><strong>Bacteriostatic Water for Injection USP</strong></div>
-    <div className="detail-row"><span>Brand / manufacturer</span><strong>Hospira / Pfizer Canada ULC</strong></div>
-    <div className="detail-row"><span>Volume</span><strong>30 mL per vial</strong></div>
-    <div className="detail-row"><span>Canadian DIN</span><strong>00038202 — verify against supplied label</strong></div>
-    <div className="detail-row"><span>Packaging</span><strong>1 vial, assembled 10-vial bundle, or factory-sealed 25-vial case</strong></div>
-    <div className="detail-row"><span>Pricing</span><strong>Canadian dollars (CAD)</strong></div>
-    <div className="detail-row"><span>Order status</span><strong>Subject to eligibility, availability and fulfillment review</strong></div>
-  </div></div></section>
-  <section id="process" className="content-section section-muted"><div className="container"><span className="section-eyebrow">03 / PROCESS</span><div className="process-title"><h2>A straightforward<br/>request process.</h2><p>Each request is considered individually. Submission is not a confirmed sale, payment or stock reservation.</p></div><div className="process-grid">{[
-    ['01','Select packaging','Choose an individual vial, an assembled 10-vial bundle, or a factory-sealed case.'],
-    ['02','Submit a request','Sign in and enter a Canadian delivery address. No payment is collected.'],
-    ['03','Review & confirmation','An administrator checks eligibility and physical lot availability before approval.'],
-    ['04','Track the outcome','Sign in to review request status and any subsequent fulfillment updates.']
-   ].map(([num,title,body])=><div className="process-card" key={num}><span>{num}</span><h3>{title}</h3><p>{body}</p></div>)}</div></div></section>
-  <section id="faq" className="content-section"><div className="container section-columns"><div className="section-intro"><span className="section-eyebrow">04 / INFORMATION</span><h2>Clear answers.<br/>No ambiguity.</h2><p>Important details about packages and the request process.</p></div><div className="faq-stack">
-   {[
-    ['What is included in the 10-vial option?','Ten individual 30 mL vials assembled as a bundle. It is not represented as original manufacturer 10-vial packaging.'],
-    ['Is the full case factory sealed?','Yes. The 25-vial case format is reserved for unopened manufacturer-sealed cases, tracked separately from loose inventory.'],
-    ['When is inventory reserved?','A submitted request does not reserve stock. Stock is reserved against eligible lots only after administrator approval.'],
-    ['Can I pay online?','No. The website currently accepts review requests and does not collect online payment.'],
-    ['Are orders available anywhere in Canada?','Canadian delivery information may be entered for review. Actual eligibility, shipping and fulfillment depend on the applicable requirements and administrator approval.']
-   ].map(([q,a])=><details key={q}><summary>{q}<ChevronDown size={18}/></summary><p>{a}</p></details>)}
-  </div></div></section>
-  <section className="disclaimer"><div className="container"><Info size={20}/><p>Recon Water is an independent Ontario-based site and is not represented as an official Pfizer or Hospira website. Product identity, labeling, eligibility and all regulatory requirements must be verified before fulfillment. Manufacturer instructions and the product label remain authoritative.</p></div></section>
  </main>;
 }
 
 export default function App(){
  const [route,setRoute]=useState(location.pathname.startsWith('/admin')?'admin':'shop');
  const [menu,setMenu]=useState(false),[authOpen,setAuthOpen]=useState(false),[recoveryOpen,setRecoveryOpen]=useState(false),[cartOpen,setCartOpen]=useState(false),[checkout,setCheckout]=useState(false),[ordersOpen,setOrdersOpen]=useState(false);
- const [session,setSession]=useState(null),[product,setProduct]=useState(null),[packages,setPackages]=useState([]),[stock,setStock]=useState({loose:0,sealed:0}),[selected,setSelected]=useState(null),[packQty,setPackQty]=useState(1);
+ const [session,setSession]=useState(null),[packages,setPackages]=useState([]),[stock,setStock]=useState({loose:0,sealed:0}),[selected,setSelected]=useState(null),[packQty,setPackQty]=useState(1);
  const [cart,setCart]=useState([]),[message,setMessage]=useState(null),[orders,setOrders]=useState([]);
  const cartDialogRef=useDialogFocus(cartOpen,()=>setCartOpen(false));
  const ordersDialogRef=useDialogFocus(ordersOpen,()=>setOrdersOpen(false));
@@ -92,7 +90,7 @@ export default function App(){
  useEffect(()=>{const pop=()=>setRoute(location.pathname.startsWith('/admin')?'admin':'shop');window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[]);
  const refresh=useCallback(async()=>{
   try{const res=await fetch('/.netlify/functions/api?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
-    setProduct(data.product);setPackages(data.packages||[]);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
+    setPackages(data.packages||[]);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
   }catch(e){alert(e.message,true)}
  },[]);
  useEffect(()=>{refresh();if(!supabase)return;supabase.auth.getSession().then(({data})=>setSession(data.session));const {data:{subscription}}=supabase.auth.onAuthStateChange((event,s)=>{setSession(s);if(event==='PASSWORD_RECOVERY')setRecoveryOpen(true)});return()=>subscription.unsubscribe()},[refresh]);
@@ -117,13 +115,12 @@ export default function App(){
  const signOut=async()=>{await supabase?.auth.signOut();setCart([]);setOrders([]);alert('Signed out successfully')};
  const navClick=id=>{if(route==='admin'){navigate('shop');setTimeout(()=>toSection(id),90)}else toSection(id);setMenu(false)};
  return <>
-  <div className="topbar"><div className="container topbar-inner"><span><span className="topbar-mark"/> INDEPENDENT PRODUCT SUPPLY · ONTARIO, CANADA</span><span>REQUESTS SUBJECT TO REVIEW</span></div></div>
   <header className="site-header"><div className="container header-row"><button className="brand-button" onClick={()=>navigate('shop')} aria-label="Recon Water home"><Brand/></button>
-   <nav className={menu?'nav-links nav-open':'nav-links'} aria-label="Primary navigation"><button onClick={()=>navClick('product')}>The product</button><button onClick={()=>navClick('details')}>Specifications</button><button onClick={()=>navClick('process')}>Process</button><button onClick={()=>navClick('faq')}>FAQ</button></nav>
+   <nav className={menu?'nav-links nav-open':'nav-links'} aria-label="Primary navigation"><button onClick={()=>navClick('product')}>Product</button><button onClick={()=>navClick('details')}>Details</button></nav>
    <div className="header-tools"><button className="text-tool" onClick={()=>session?(loadOrders(),setOrdersOpen(true)):setAuthOpen(true)}><UserRound size={19}/><span>{session?'My requests':'Account'}</span></button><button className="cart-trigger" aria-label="Open request cart" onClick={()=>setCartOpen(true)}><ShoppingBag size={19}/><span>{cart.reduce((n,i)=>n+i.quantity,0)}</span></button><button className="mobile-trigger" aria-expanded={menu} aria-label="Toggle navigation" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></div>
   </div></header>
-  {route==='shop'?<MainShop product={product} packages={packages} stock={stock} selected={selected} setSelected={setSelected} packQty={packQty} setPackQty={setPackQty} cart={cart} onAdd={add}/>:<React.Suspense fallback={<main className="loading-admin">Loading administrator workspace…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={alert} onSignOut={signOut} reloadPublic={refresh}/></React.Suspense>}
-  <footer className="site-footer"><div className="container footer-content"><div><Brand/><p>Independent Canadian product information and request management. Ontario based.</p></div><div><strong>PRODUCT</strong><button onClick={()=>navClick('product')}>Hospira 30 mL</button><button onClick={()=>navClick('details')}>Specifications</button><button onClick={()=>navClick('faq')}>Questions</button></div><div><strong>INFORMATION</strong><button onClick={()=>navClick('process')}>Review process</button><span>Privacy, terms and contact policies: pending operator review</span></div></div><div className="container footer-base"><span>© {new Date().getFullYear()} Recon Water · Independent operator</span><span>Ontario, Canada · Pricing in CAD · No payment collected online</span></div></footer>
+  {route==='shop'?<MainShop packages={packages} stock={stock} selected={selected} setSelected={setSelected} packQty={packQty} setPackQty={setPackQty} cart={cart} onAdd={add}/>:<React.Suspense fallback={<main className="loading-admin">Loading administrator workspace…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={alert} onSignOut={signOut} reloadPublic={refresh}/></React.Suspense>}
+  <footer className="site-footer"><div className="container minimal-footer"><div><strong>RECON WATER</strong><span>Ontario, Canada</span></div><p>Independent operator; not affiliated with Pfizer or Hospira. Product requests are subject to review. No payment is collected online.</p><span>© {new Date().getFullYear()} Recon Water</span></div></footer>
   <Notice message={message} clear={()=>setMessage(null)}/>
   {cartOpen&&<div className="scrim" onMouseDown={e=>e.target===e.currentTarget&&setCartOpen(false)}><aside ref={cartDialogRef} className="cart-drawer" role="dialog" aria-modal="true" aria-label="Request cart"><div className="drawer-header"><div><span className="section-eyebrow">YOUR SELECTION</span><h2>Request cart.</h2></div><button className="icon-button" aria-label="Close cart" onClick={()=>setCartOpen(false)}><X/></button></div><div className="drawer-lines">{liveCart.length?liveCart.map(p=><div className="drawer-line" key={p.id}><div className="mini-product"><Droplet size={24}/></div><div className="drawer-detail"><strong>{p.label}</strong><small>{p.vials_per_pack} × 30 mL · {money(p.price_cents)} per package</small><div className="mini-stepper"><button aria-label={`Remove one ${p.label}`} onClick={()=>adjust(p,-1)}><Minus size={14}/></button><span>{p.quantity}</span><button aria-label={`Add one ${p.label}`} onClick={()=>adjust(p,1)}><Plus size={14}/></button></div></div><strong>{money(p.quantity*p.price_cents)}</strong></div>):<div className="empty-state"><ShoppingBag size={38}/><h3>Your request is empty</h3><p>Select a packaging format to continue.</p></div>}</div>{liveCart.length>0&&<div className="drawer-bottom"><div className="drawer-summary"><span>{cartCountVials(cart)} total vials · Product subtotal</span><strong>{money(subtotal)}</strong></div><p>Packaging and product subtotal only. Taxes, delivery, eligibility and fulfillment are reviewed separately.</p><button className="primary-button" onClick={begin}>Continue request <ArrowRight size={18}/></button></div>}</aside></div>}
   {authOpen&&<Auth close={()=>setAuthOpen(false)} alert={alert}/>}

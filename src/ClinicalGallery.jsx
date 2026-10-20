@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {ChevronLeft, ChevronRight, Droplet, FileText, Maximize2, ShieldCheck, X} from 'lucide-react';
+import {ChevronLeft, ChevronRight, Droplet, Maximize2, X} from 'lucide-react';
 import {RECON_PRODUCT_MEDIA} from './productMedia';
 import './clinical-gallery.css';
 
@@ -25,20 +25,20 @@ export default function ClinicalGallery(){
   };document.addEventListener('keydown',key);return()=>{document.removeEventListener('keydown',key);document.body.style.overflow=overflow;former?.focus?.()};
  },[open,available.length]);
  return <section className="clinical-gallery" aria-label="Product presentation">
-  <div className="clinical-gallery-head"><span className="clinical-kicker">PRODUCT / 001</span><span className="clinical-gallery-din">DIN 00038202 · CHECK LABEL</span></div>
+  <div className="clinical-gallery-head"><span>01 / HOSPIRA WATER</span><span>30 mL</span></div>
   <div className={`clinical-gallery-stage ${photo?'has-photo':'no-photo'}`}>
    {photo ? <button type="button" className="clinical-gallery-photo" aria-label={`Enlarge ${photo.label} photograph`} onClick={()=>setOpen(true)}>
      <img src={photo.src} alt={`Hospira Bacteriostatic Water 30 mL — ${photo.label}. Verify against actual stock.`} fetchPriority="high" loading="eager" decoding="async" onError={()=>{setFailed(a=>[...a,photo.id]);setActive(0)}}/>
      <span className="clinical-zoom"><Maximize2 size={16}/> Enlarge photograph</span></button>
    : <div className="clinical-no-photo" aria-label="Product photo pending verification">
-      <div className="clinical-no-photo-symbol"><Droplet size={46} strokeWidth={1.1}/></div>
-      <span className="clinical-art-line"/><span className="clinical-art-tag">30<span>mL</span></span>
-      <strong>BACTERIOSTATIC WATER</strong><span>FOR INJECTION USP</span>
-      <div className="clinical-placeholder-disclosure"><FileText size={15}/> Technical placeholder — not product packaging</div>
+      <div className="clinical-no-photo-symbol"><Droplet size={53} strokeWidth={1.1}/></div>
+      <span className="clinical-art-tag">30<span>mL</span></span>
+      <strong>Hospira Bacteriostatic Water</strong>
+      <div className="clinical-placeholder-disclosure">Product photograph pending — not product packaging</div>
      </div>}
   </div>
   {available.length>1 ? <div className="clinical-gallery-thumbs" role="group" aria-label="Product views">{available.map((p,i)=><button key={p.id} type="button" className={photo?.id===p.id?'is-active':''} aria-pressed={photo?.id===p.id} onClick={()=>setActive(i)}><img src={p.src} alt="" loading="lazy"/><span>{p.label}</span></button>)}</div>
-   : <p className="clinical-gallery-footnote"><ShieldCheck size={15}/> {photo?'Verified source photo must match the stocked Canadian vial.':'Authentic photographs will be added after packaging verification.'}</p>}
+   : null}
   {open&&photo&&<div className="clinical-lightbox" role="presentation" onMouseDown={e=>e.target===e.currentTarget&&setOpen(false)}><section ref={modalRef} className="clinical-lightbox-panel" role="dialog" aria-modal="true" aria-label="Enlarged product photograph"><div className="clinical-lightbox-top"><span>{photo.label}</span><button ref={closeRef} type="button" onClick={()=>setOpen(false)} aria-label="Close photograph"><X size={22}/></button></div><img src={photo.src} alt={`Enlarged ${photo.label} photograph of Hospira 30 mL vial`}/>{available.length>1&&<div className="clinical-lightbox-controls"><button type="button" onClick={()=>advance(-1)} aria-label="Previous photo"><ChevronLeft/></button><span>{active+1} / {available.length}</span><button type="button" onClick={()=>advance(1)} aria-label="Next photo"><ChevronRight/></button></div>}</section></div>}
  </section>;
 }

@@ -1,16 +1,59 @@
-/* Recon Water surgical/clinical storefront — single source for the purchase hero. */
-.clinical-hero{background:linear-gradient(180deg,#fff 0%,#f8fbfc 100%);padding:25px 0 85px;position:relative;overflow:clip}
-.clinical-breadcrumb{display:flex;gap:12px;align-items:center;color:#94a8b2;font-size:10px;letter-spacing:.13em;font-weight:800;padding:12px 0 28px}.clinical-breadcrumb strong{color:#315c71}
-.clinical-hero-grid{display:grid;grid-template-columns:minmax(0,.96fr) minmax(0,1.04fr);gap:clamp(28px,4vw,72px);align-items:start}
-.clinical-hero-media{min-width:0;position:sticky;top:105px}.clinical-hero-info{min-width:0;padding-top:19px}.clinical-kicker{color:#307b95;font-size:10px;font-weight:800;letter-spacing:.145em;display:flex;gap:9px;align-items:center}.clinical-live-dot{background:#33849a;height:7px;width:7px;border-radius:50%;display:inline-block;box-shadow:0 0 0 4px #e2f1f5}
-.clinical-hero-info h1{font-family:Manrope,Inter,system-ui,sans-serif;font-size:clamp(32px,3.35vw,58px);letter-spacing:-.064em;line-height:1.12;font-weight:800;color:#13384c;margin:23px 0 13px}.clinical-hero-info h1 span{display:block;font-weight:550;color:#4b778a}
-.clinical-subtitle{font-size:14px;font-weight:750;color:#265971;line-height:1.65;margin:0 0 12px}.clinical-description{color:#657f8b;font-size:13px;line-height:1.9;max-width:580px;margin:0 0 27px}
-.clinical-specs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border:1px solid #dce7eb;border-radius:11px;background:#fff;overflow:hidden;margin-bottom:36px}.clinical-specs>div{padding:17px 13px;min-width:0;display:flex;flex-direction:column;gap:7px}.clinical-specs>div+div{border-left:1px solid #e0eaee}.clinical-specs span{font-size:9px;letter-spacing:.13em;font-weight:800;color:#7c99a7}.clinical-specs strong{font-size:12px;color:#1e4b61;line-height:1.4}
-.clinical-select-title{display:flex;justify-content:space-between;align-items:end;gap:10px;margin:0 0 15px}.clinical-select-title h2{margin:7px 0 0;font-size:21px;font-weight:800;letter-spacing:-.045em;color:#163e51}.clinical-format-help{font-size:11px;color:#77929f;white-space:nowrap}
-.clinical-packages{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:9px}.visually-hidden{position:absolute!important;height:1px;width:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.clinical-package{display:flex;align-items:center;gap:12px;border:1px solid #dce7ec;border-radius:11px;background:#fff;padding:15px 16px;cursor:pointer;min-height:78px;transition:border-color .16s,background .16s,box-shadow .16s}.clinical-package:hover{border-color:#81aebf;background:#fafcfd}.clinical-package:focus-within{outline:3px solid #66b0c57a;outline-offset:2px}.clinical-package.is-selected{border:1.5px solid #237c95;box-shadow:0 0 0 2px #1a81970b;background:#f5fbfd}.clinical-package>input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}.clinical-package-radio{width:20px;height:20px;border:2px solid #b0c8d1;border-radius:50%;flex-shrink:0;display:grid;place-items:center}.clinical-package.is-selected .clinical-package-radio{border-color:#217a95}.clinical-package.is-selected .clinical-package-radio:after{content:"";display:block;width:9px;height:9px;border-radius:50%;background:#217a95}.clinical-package-copy{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0}.clinical-package-copy strong{font-size:13px;color:#1d455a;font-weight:800}.clinical-package-copy small{font-size:10px;line-height:1.5;color:#7b909c}.clinical-package-pricing{display:flex;flex-direction:column;align-items:end;text-align:right;gap:6px;flex-shrink:0}.clinical-package-pricing strong{color:#173e52;font-size:15px;letter-spacing:-.025em}.clinical-package-pricing small{font-size:9px;color:#7795a1}.clinical-packages-empty{padding:25px;background:#f6fafb;border:1px solid #dce7ec;border-radius:10px;color:#647e8a;font-size:12px;line-height:1.6}
-.clinical-purchase{margin-top:18px;border:1px solid #d7e5eb;border-radius:13px;background:white;padding:24px;box-shadow:0 13px 34px #27556a0a}.clinical-purchase-price{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:22px;border-bottom:1px solid #e8eff2}.clinical-purchase-price>div:first-child{display:flex;flex-direction:column;gap:5px}.clinical-purchase-price>div:first-child>span{font-size:9px;color:#7b97a3;font-weight:800;letter-spacing:.13em}.clinical-purchase-price>div:first-child>strong{color:#12394f;font-size:37px;font-weight:800;letter-spacing:-.065em;line-height:1.23}.clinical-purchase-price>div:first-child>small{color:#77939f;font-size:11px}.clinical-stock-status{display:flex;align-items:center;gap:8px;color:#7b8892;font-size:10px;font-weight:800;border:1px solid #e0e9ed;border-radius:40px;padding:10px 12px}.clinical-stock-status.is-available{background:#eef8f5;border-color:#d1eae1;color:#26745d}.clinical-status-dot{width:7px;height:7px;border-radius:50%;background:currentColor}.clinical-purchase-actions{display:grid;grid-template-columns:145px minmax(0,1fr);gap:12px;margin-top:20px}.clinical-quantity{display:flex;border:1px solid #d4e3ea;border-radius:9px;overflow:hidden;height:51px;align-items:center;justify-content:space-between}.clinical-quantity button{background:transparent;border:0;width:42px;height:100%;display:grid;place-items:center;color:#266581}.clinical-quantity button:disabled{opacity:.3;cursor:not-allowed}.clinical-quantity output{font-size:14px;color:#1c4a60;font-weight:800}.clinical-add-button{min-width:0;justify-content:center;gap:11px;min-height:51px}.clinical-order-note{font-size:11px;line-height:1.7;color:#718a96;display:flex;align-items:start;gap:8px;margin:18px 0 0}.clinical-order-note svg{flex-shrink:0}.clinical-identification-note{color:#8b9eaa;font-size:10px;line-height:1.6;margin:18px 0 0}
-@media(max-width:1080px){.clinical-hero-grid{gap:26px}.clinical-hero-info h1{font-size:clamp(32px,3.7vw,48px)}.clinical-purchase{padding:18px}.clinical-specs>div{padding:14px 10px}.clinical-specs strong{font-size:11px}}
-@media(max-width:850px){.clinical-hero-grid{grid-template-columns:1fr}.clinical-hero-media{position:static}.clinical-hero-info{padding:6px 0 0}.clinical-hero{padding-bottom:65px}.clinical-hero-info h1{font-size:clamp(34px,5.4vw,52px)}.clinical-hero-grid{gap:23px}}
-@media(max-width:550px){.clinical-hero{padding:10px 0 50px}.clinical-breadcrumb{font-size:9px;padding:10px 0 19px}.clinical-hero-info h1{font-size:35px;letter-spacing:-.06em;margin-top:18px}.clinical-description{font-size:12px;line-height:1.7}.clinical-subtitle{font-size:12px}.clinical-specs{margin-bottom:26px}.clinical-specs>div{padding:12px 8px}.clinical-specs strong{font-size:10px}.clinical-specs span{font-size:8px}.clinical-select-title h2{font-size:19px}.clinical-format-help{font-size:9px}.clinical-package{min-height:73px;gap:10px;padding:12px}.clinical-package-copy strong{font-size:12px}.clinical-package-copy small{font-size:9px}.clinical-package-pricing strong{font-size:13px}.clinical-package-pricing small{font-size:8px}.clinical-purchase{padding:17px}.clinical-purchase-price>div:first-child>strong{font-size:31px}.clinical-purchase-actions{grid-template-columns:113px minmax(0,1fr);gap:9px}.clinical-quantity button{width:34px}.clinical-add-button{font-size:11px;padding:12px 8px}.clinical-add-button svg:first-child{display:none}}
-@media(max-width:360px){.clinical-package{gap:8px;padding:10px}.clinical-package-copy small{font-size:8px}.clinical-purchase-actions{grid-template-columns:101px minmax(0,1fr)}.clinical-add-button{gap:5px}.clinical-specs{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(prefers-reduced-motion:reduce){.clinical-package{transition:none}}
+/* Recon Water: single-product clinical storefront. No inherited decorative-hero rules. */
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.minimal-main{background:#f7f9fa}
+.clinical-hero{min-height:calc(100svh - 76px);padding:clamp(30px,4vw,68px) 0 86px;background:linear-gradient(125deg,#fbfcfd 0%,#f4f8f9 75%,#f0f5f6 100%)}
+.clinical-hero-grid{display:grid;grid-template-columns:minmax(0,1.03fr) minmax(0,.97fr);gap:clamp(40px,6.5vw,112px);align-items:start}
+.clinical-hero-media{min-width:0;position:sticky;top:105px}
+.clinical-hero-info{min-width:0;padding:12px 0 0}
+.clinical-kicker{font-size:10px;font-weight:800;letter-spacing:.17em;color:#3c7b8d;text-transform:uppercase}
+.clinical-hero-info h1{font-family:Manrope,Inter,system-ui,sans-serif;font-size:clamp(35px,3.25vw,54px);letter-spacing:-.052em;line-height:1.11;font-weight:800;color:#122f3e;margin:16px 0 12px}
+.clinical-hero-info h1 span{display:block;color:#5b7481;font-size:.7em;font-weight:600;letter-spacing:-.034em;margin-top:6px}
+.clinical-subtitle{color:#55727d;font-size:13px;line-height:1.6;margin:0 0 36px;font-weight:600}
+.clinical-select-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 13px}
+.clinical-select-title h2{margin:0;font-size:15px;line-height:1.4;font-weight:800;letter-spacing:-.015em;color:#24424e}
+.clinical-select-title>span{color:#8596a0;letter-spacing:.12em;font-size:10px;font-weight:800}
+.clinical-packages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;border:0;margin:0;padding:0}
+.clinical-package{min-width:0;min-height:132px;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:1px solid #d9e3e6;border-radius:12px;padding:16px 13px 13px;background:#fff;cursor:pointer;transition:border-color .18s,box-shadow .18s,background .18s}
+.clinical-package:hover{border-color:#97b9c3;background:#fafdfe}
+.clinical-package:focus-within{outline:3px solid #54a3b9;outline-offset:2px}
+.clinical-package.is-selected{border-color:#1d6d83;box-shadow:inset 0 0 0 1px #1d6d83,0 8px 25px #174e6010;background:#f7fcfd}
+.clinical-package input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.clinical-package-check{height:18px;width:18px;border:1px solid #b6c9cf;border-radius:50%;color:transparent;display:grid;place-items:center;margin-bottom:5px}
+.clinical-package.is-selected .clinical-package-check{background:#17677e;color:white;border-color:#17677e}
+.clinical-package>strong{color:#1d3f4b;font-size:12px;line-height:1.25;font-weight:800}
+.clinical-package>small{color:#7a929b;line-height:1.5;font-size:9px;min-height:26px}
+.clinical-package-price{color:#143a4b;font-size:16px;font-weight:800;letter-spacing:-.025em;margin-top:auto}
+.clinical-packages-empty{grid-column:1/-1;background:#fff;border:1px solid #dae5e9;border-radius:10px;padding:26px 18px;color:#55747f;font-size:13px}
+.clinical-purchase{margin-top:22px}
+.clinical-purchase-price{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:20px 0;border-top:1px solid #dbe5e8}
+.clinical-purchase-price>div{display:flex;flex-direction:column;align-items:start;gap:4px;min-width:0}
+.clinical-purchase-price span:not(.clinical-status-dot){font-size:9px;letter-spacing:.13em;color:#7d9199;font-weight:800}
+.clinical-purchase-price strong{font-size:clamp(29px,2.8vw,39px);line-height:1.2;letter-spacing:-.045em;color:#0f3242;font-weight:800}
+.clinical-purchase-price small{font-size:11px;color:#7b919a}
+.clinical-stock-status{border-radius:40px;border:1px solid #d7e3e6;background:#fff;color:#7a868e;display:flex;align-items:center;gap:7px;padding:8px 10px;white-space:nowrap;font-size:10px;font-weight:750;letter-spacing:0}
+.clinical-stock-status.is-available{color:#23725c;background:#e9f6f0;border-color:#d0e8dd}
+.clinical-status-dot{background:currentColor;width:6px;height:6px;border-radius:100%}
+.clinical-purchase-actions{display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px}
+.clinical-quantity{height:52px;display:flex;align-items:center;justify-content:space-between;border:1px solid #d5e2e7;border-radius:9px;background:white;overflow:hidden}
+.clinical-quantity button{background:transparent;border:0;height:100%;width:39px;display:grid;place-items:center;color:#2e6173}
+.clinical-quantity button:hover:not(:disabled){background:#edf5f7}
+.clinical-quantity output{color:#163e4c;font-size:14px;font-weight:800}
+.clinical-add-button{width:100%;height:52px;letter-spacing:0;font-size:13px}
+.clinical-cart-count{display:flex;align-items:center;gap:6px;color:#2c7665;font-size:11px;margin:11px 0 0}
+.clinical-order-note{margin:12px 0 0;color:#7d9099;font-size:10px;line-height:1.6}
+.clinical-quick-info{margin-top:26px;border-top:1px solid #dce6e9}
+.clinical-quick-info>button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;border:0;border-bottom:1px solid #dce6e9;background:transparent;padding:16px 2px;color:#254b59;font-size:12px;font-weight:800;text-align:left}
+.clinical-quick-info>button svg{color:#7396a2;transition:transform .18s}
+.clinical-quick-info>button[aria-expanded="true"] svg{transform:rotate(180deg)}
+.clinical-quick-panel{padding:15px 3px 18px;border-bottom:1px solid #dce6e9;color:#5d7a85;font-size:12px;line-height:1.65;animation:clinical-enter .17s ease}
+.clinical-quick-panel dl{margin:0}
+.clinical-quick-panel dl>div{display:flex;justify-content:space-between;gap:20px;padding:7px 0}
+.clinical-quick-panel dt{color:#8096a0}
+.clinical-quick-panel dd{color:#274959;text-align:right;font-weight:700;margin:0}
+.clinical-quick-panel p{margin:7px 0}
+@keyframes clinical-enter{from{opacity:.25;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media(max-width:1020px){.clinical-hero-grid{gap:32px}.clinical-hero-info h1{font-size:clamp(30px,3.7vw,46px)}.clinical-package{padding:13px 9px;min-height:125px}.clinical-package-price{font-size:14px}}
+@media(max-width:800px){.clinical-hero{padding:24px 0 50px}.clinical-hero-grid{grid-template-columns:1fr;gap:22px}.clinical-hero-media{position:static}.clinical-hero-info{padding:0}.clinical-hero-info h1{font-size:clamp(34px,5vw,48px)}.clinical-subtitle{margin-bottom:24px}.clinical-package{min-height:108px;padding:14px}.clinical-package-price{font-size:17px}}
+@media(max-width:480px){.clinical-hero{padding:17px 0 40px}.clinical-hero-info h1{font-size:34px}.clinical-subtitle{font-size:12px}.clinical-packages{gap:6px}.clinical-package{padding:11px 8px;min-height:117px;gap:5px;border-radius:9px}.clinical-package-check{width:17px;height:17px;margin-bottom:4px}.clinical-package>strong{font-size:11px}.clinical-package>small{font-size:9px;min-height:34px}.clinical-package-price{font-size:13px}.clinical-purchase-price{align-items:start;flex-wrap:wrap}.clinical-purchase-actions{grid-template-columns:101px minmax(0,1fr);gap:8px}.clinical-quantity button{width:31px}.clinical-add-button{padding:12px 8px;font-size:11px}.clinical-add-button svg{width:15px}.clinical-quick-panel dl>div{gap:9px}}
+@media(max-width:360px){.clinical-package{padding:10px 6px}.clinical-package>small{font-size:8px}.clinical-package>strong{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.clinical-package,.clinical-quick-info>button svg{transition:none}.clinical-quick-panel{animation:none}}
