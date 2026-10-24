@@ -67,7 +67,7 @@ function InternationalOrders() {
     <div className="trustbar"><div className="container trustbar-inner">
       <span><Icon name="shield" size={14}/> International order portal</span><span className="trustbar-sep">•</span>
       <span>Maximum 5 vials</span><span className="trustbar-sep">•</span>
-      <span><Icon name="truck" size={15}/> $30 CAD flat delivery</span>
+      <span><Icon name="truck" size={15}/> $30 USD flat delivery</span>
     </div></div>
 
     <header className="site-header"><div className="container nav-wrap">
@@ -85,7 +85,7 @@ function InternationalOrders() {
           <div className="international-rules">
             <div><strong>$20 USD</strong><span>per vial</span></div>
             <div><strong>1–5</strong><span>vials maximum</span></div>
-            <div><strong>$30 CAD</strong><span>flat delivery</span></div>
+            <div><strong>$30 USD</strong><span>flat delivery</span></div>
           </div>
           <div className="international-note"><Icon name="info" size={18}/><span>Canadian addresses must use the Canadian storefront. International availability is reviewed before fulfillment.</span></div>
           <a className="international-return-link" href="/"><Icon name="arrowLeft" size={16}/> Return to Canadian storefront</a>
@@ -94,7 +94,7 @@ function InternationalOrders() {
         <form className="international-card" onSubmit={submit}>
           <div className="international-card-head"><div><span>INTERNATIONAL REQUEST</span><h2>Bacteriostatic Water · 30 mL</h2></div><Icon name="truck" size={22}/></div>
           <div className="intl-qty-row"><div><span>Quantity</span><small>Maximum 5 vials</small></div><div className="intl-stepper"><button type="button" onClick={()=>setQty(q=>Math.max(1,q-1))} aria-label="Decrease international quantity">−</button><strong>{qty}</strong><button type="button" onClick={()=>setQty(q=>Math.min(5,q+1))} aria-label="Increase international quantity">+</button></div></div>
-          <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(productSubtotal)} USD</strong></div><div><span>Flat delivery</span><strong>$30.00 CAD</strong></div></div>
+          <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(productSubtotal)} USD</strong></div><div><span>Flat delivery</span><strong>$30.00 USD</strong></div></div>
           <div className="intl-form-grid">
             <label><span>Name</span><input required minLength="2" maxLength="100" autoComplete="name" value={form.name} onChange={e=>patch('name',e.target.value)}/></label>
             <label><span>Email</span><input required type="email" autoComplete="email" value={form.email} onChange={e=>patch('email',e.target.value)}/></label>
@@ -107,7 +107,7 @@ function InternationalOrders() {
           </div>
           {status.message&&<div className={`intl-status ${status.ok?'ok':'error'}`} role="status">{status.message}</div>}
           <button className="intl-submit" disabled={status.busy}>{status.busy?'Submitting…':`Submit international request · ${money(productSubtotal)} USD`}<Icon name="chevron" size={17}/></button>
-          <p className="intl-disclaimer">No payment is collected through this form. Product subtotal is USD; delivery is a separate $30 CAD flat charge.</p>
+          <p className="intl-disclaimer">No payment is collected through this form. Product subtotal is USD; delivery is a $30 USD flat charge.</p>
         </form>
       </div></section>
     </main>

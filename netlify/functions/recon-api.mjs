@@ -222,7 +222,7 @@ export async function handler(event) {
 
       // Fixed international commercial rules are defined only here on the server.
       const unitPriceCents = 2000; // USD $20.00 per vial
-      const shippingCents = 3000; // CAD $30.00 flat delivery
+      const shippingCents = 3000; // USD $30.00 flat delivery
 
       const { data: order, error: orderError } = await db
         .from('orders')
@@ -236,7 +236,7 @@ export async function handler(event) {
           market: 'international',
           subtotal_currency: 'USD',
           shipping_cents: shippingCents,
-          shipping_currency: 'CAD',
+          shipping_currency: 'USD',
         })
         .select('id,order_number')
         .single();
