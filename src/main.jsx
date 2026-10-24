@@ -4,14 +4,14 @@ import './styles.css';
 
 const PRODUCT_IMAGES = [
   {
-    src: 'https://marchesemedicalsupplies.ca/cdn/shop/files/bacwater2.png?v=1769535937&width=1946',
-    alt: 'Hospira Bacteriostatic Water for Injection USP 30 mL Canadian vial',
+    src: '/assets/bac-water-front.webp',
+    alt: 'Bacteriostatic Water for Injection USP 30 mL vial front view',
     label: 'Front'
   },
   {
-    src: 'https://www.muscle-gear.net/media/catalog/product/b/a/bacteriostatic_water.png',
-    alt: 'Hospira Bacteriostatic Water for Injection USP 30 mL bilingual Canadian vial',
-    label: 'Label'
+    src: '/assets/bac-water-angle.webp',
+    alt: 'Bacteriostatic Water for Injection USP 30 mL vial angled view',
+    label: 'Angled'
   }
 ];
 
@@ -95,7 +95,7 @@ function App(){
               </button>)}
               <div className="thumb-spec"><span>30</span><small>mL</small></div>
             </div>
-            <p className="image-note">Product imagery shown for identification. Final production photography should match the exact inventory supplied.</p>
+            <p className="image-note">Product imagery based on the current supplied vial and label reference.</p>
           </div>
 
           <div className="purchase-column">
