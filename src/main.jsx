@@ -67,7 +67,6 @@ function App(){
         </a>
         <nav className="desktop-nav" aria-label="Primary">
           <a href="#product">Product</a>
-          <a href="#why">Why us</a>
         </nav>
         <button className="cart-trigger" onClick={()=>setCartOpen(true)} aria-label="Open cart">
           <Icon name="cart" /> <span>Cart</span><b>{cart?.qty || 0}</b>
