@@ -5,18 +5,5 @@
 [functions]
   node_bundler = "esbuild"
 
-# Admin is a dedicated Vite entry. Keep these rules before the storefront fallback.
-[[redirects]]
-  from = "/admin"
-  to = "/admin/"
-  status = 301
-
-[[redirects]]
-  from = "/admin/*"
-  to = "/admin/index.html"
-  status = 200
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Routing is intentionally defined in public/_redirects because Netlify
+# evaluates _redirects BEFORE netlify.toml. Do not add a competing catch-all here.

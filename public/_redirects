@@ -1,3 +1,7 @@
-/admin /admin/ 301
-/admin/* /admin/index.html 200
+# Admin must be resolved before the storefront SPA fallback.
+/admin /admin.html 200
+/admin/ /admin.html 200
+/admin/* /admin.html 200
+
+# Storefront SPA fallback — keep LAST.
 /* /index.html 200
