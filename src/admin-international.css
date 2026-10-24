@@ -1,0 +1,4 @@
+.admin-order.is-international{border-color:#b8d7e6;box-shadow:0 8px 30px rgba(10,101,168,.06)}
+.admin-order-id-row{display:flex;align-items:center;gap:9px}
+.market-badge{display:inline-flex;align-items:center;height:21px;padding:0 8px;border-radius:999px;background:#e7f4fb;color:#0a65a8;font-size:8px;font-weight:800;letter-spacing:.08em}
+.admin-shipping-charge{display:block;margin-top:4px;font-size:9px;color:#657b86;font-weight:700}

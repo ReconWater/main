@@ -106,6 +106,25 @@ export async function handler(event) {
       return json(200, data);
     }
 
+    if (event.httpMethod === 'POST' && mode === 'submit-international') {
+      let body;
+      try { body = JSON.parse(event.body || '{}'); }
+      catch { return json(400, { error: 'Invalid request data.' }); }
+      const quantity = Number(body.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) return json(400, { error: 'International orders are limited to 1–5 vials.' });
+      const { data, error } = await db.rpc('service_submit_international_order_v1', {
+        p_email: body.email,
+        p_name: body.name,
+        p_shipping: body.shipping,
+        p_quantity: quantity,
+        p_notes: body.notes || '',
+      });
+      if (error) throw error;
+      const { data: order, error: orderError } = await db.from('orders').select('order_number').eq('id', data).maybeSingle();
+      if (orderError) throw orderError;
+      return json(200, { order_id: data, order_number: order?.order_number || null });
+    }
+
     if (event.httpMethod === 'GET' && mode === 'admin') {
       const auth = await requireAdmin(db, event);
       if (auth.error) return json(auth.status, { error: auth.error });
