@@ -63,9 +63,8 @@ function App(){
 
     <header className="site-header">
       <div className="container nav-wrap">
-        <a className="brand" href="#top" aria-label="BAC Water Direct home">
-          <span className="brand-drop">B</span>
-          <span className="brand-copy"><strong>BAC Water</strong><small>DIRECT</small></span>
+        <a className="brand brand-logo-link" href="#top" aria-label="Recon Water home">
+          <img className="brand-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" />
         </a>
         <nav className="desktop-nav" aria-label="Primary">
           <a href="#product">Product</a>
@@ -144,31 +143,6 @@ function App(){
         </div>
       </section>
 
-      <section className="detail-section">
-        <div className="container detail-grid">
-          <div className="detail-copy">
-            <span className="section-tag">PRODUCT INFORMATION</span>
-            <h2>The information customers need.<br/><em>Nothing they don’t.</em></h2>
-            <p>A focused product page should establish exactly what is being sold, who manufactures it, and how it will be fulfilled—without turning the page into a wall of medical copy.</p>
-            <div className="spec-list">
-              <div><span>Product</span><b>Bacteriostatic Water for Injection USP</b></div>
-              <div><span>Manufacturer</span><b>Pfizer Canada ULC / Hospira</b></div>
-              <div><span>DIN</span><b>00038202</b></div>
-              <div><span>Format</span><b>30 mL multidose vial</b></div>
-              <div><span>Dosage form</span><b>Solution</b></div>
-              <div><span>Status</span><b>Marketed in Canada</b></div>
-            </div>
-          </div>
-          <aside className="verification-card">
-            <div className="verification-icon"><Icon name="shield" size={30}/></div>
-            <span>HEALTH CANADA DIN</span>
-            <strong>00038202</strong>
-            <p>Product identity and market status can be independently verified through Health Canada’s Drug Product Database.</p>
-            <a href="https://health-products.canada.ca/dpd-bdpp/info?code=117&lang=eng" target="_blank" rel="noreferrer">Verify product record <Icon name="chevron" size={16}/></a>
-          </aside>
-        </div>
-      </section>
-
       <section className="shipping-section" id="shipping">
         <div className="container shipping-shell">
           <div className="shipping-copy"><span className="section-tag light">FULFILMENT</span><h2>Shipping that reads like an answer, not a policy manual.</h2><p>Keep the checkout promise simple. Show the rate and estimated handling window directly in the purchase flow once your final carrier rules are confirmed.</p></div>
@@ -203,8 +177,8 @@ function App(){
     </main>
 
     <footer>
-      <div className="container footer-top"><div className="footer-brand"><a className="brand inverse" href="#top"><span className="brand-drop">B</span><span className="brand-copy"><strong>BAC Water</strong><small>DIRECT</small></span></a><p>A focused Canadian storefront for bacteriostatic water.</p></div><div><b>Shop</b><a href="#product">30 mL vial</a><a href="#product">Quantity pricing</a></div><div><b>Information</b><a href="#why">Product details</a><a href="#shipping">Shipping</a><a href="#faq">FAQ</a></div><div><b>Legal</b><a href="#">Terms</a><a href="#">Privacy</a><a href="#">Returns</a></div></div>
-      <div className="container footer-bottom"><span>© 2026 BAC Water Direct</span><span>Product sales subject to applicable Canadian laws and regulations.</span></div>
+      <div className="container footer-top"><div className="footer-brand"><a className="brand footer-logo-link" href="#top" aria-label="Recon Water home"><img className="footer-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a><p>A focused Canadian storefront for bacteriostatic water.</p></div><div><b>Shop</b><a href="#product">30 mL vial</a><a href="#product">Quantity pricing</a></div><div><b>Information</b><a href="#why">Product details</a><a href="#shipping">Shipping</a><a href="#faq">FAQ</a></div><div><b>Legal</b><a href="#">Terms</a><a href="#">Privacy</a><a href="#">Returns</a></div></div>
+      <div className="container footer-bottom"><span>© 2026 Recon Water</span><span>Product sales subject to applicable Canadian laws and regulations.</span></div>
     </footer>
 
     <div className={`cart-drawer ${cartOpen?'open':''}`} aria-hidden={!cartOpen}>
