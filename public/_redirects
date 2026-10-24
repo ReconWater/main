@@ -1,4 +1,7 @@
-# Admin must be resolved before the storefront SPA fallback.
+# Backend API must resolve before any SPA fallback.
+/api/recon /.netlify/functions/api 200
+
+# Admin entry must resolve before the storefront SPA fallback.
 /admin /admin.html 200
 /admin/ /admin.html 200
 /admin/* /admin.html 200

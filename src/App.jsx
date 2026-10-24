@@ -89,7 +89,7 @@ export default function App(){
  const navigate=to=>{history.pushState({},'',to==='admin'?'/admin':'/');setRoute(to);setMenu(false);window.scrollTo(0,0);};
  useEffect(()=>{const pop=()=>setRoute(location.pathname.startsWith('/admin')?'admin':'shop');window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[]);
  const refresh=useCallback(async()=>{
-  try{const res=await fetch('/.netlify/functions/api?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
+  try{const res=await fetch('/api/recon?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
     setPackages(data.packages||[]);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
   }catch(e){alert(e.message,true)}
  },[]);

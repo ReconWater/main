@@ -3,7 +3,8 @@
   publish = "dist"
 
 [functions]
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Routing is intentionally defined in public/_redirects because Netlify
-# evaluates _redirects BEFORE netlify.toml. Do not add a competing catch-all here.
+# All rewrites are intentionally kept in public/_redirects so their order is explicit.
+# /api/recon must stay before the storefront catch-all.

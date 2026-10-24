@@ -24,7 +24,7 @@ export const supabase = configured
   : null;
 
 export async function callApi(action, session, payload = {}) {
-  const response = await fetch(`/.netlify/functions/api?action=${encodeURIComponent(action)}`, {
+  const response = await fetch(`/api/recon?action=${encodeURIComponent(action)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -33,14 +33,22 @@ export async function callApi(action, session, payload = {}) {
     body: JSON.stringify(payload),
   });
 
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error('Service unavailable. Check the Netlify Function configuration.');
+  const contentType = response.headers.get('content-type') || '';
+  const raw = await response.text();
+  let data = null;
+
+  if (contentType.includes('application/json')) {
+    try { data = raw ? JSON.parse(raw) : {}; }
+    catch { throw new Error('Recon API returned malformed JSON.'); }
+  } else {
+    const looksLikeHtml = /^\s*<!doctype|^\s*<html/i.test(raw);
+    if (looksLikeHtml) {
+      throw new Error('Recon API route is being served by the storefront fallback. Redeploy the Netlify function and redirects.');
+    }
+    throw new Error(`Recon API unavailable (${response.status}).`);
   }
 
-  if (!response.ok) throw new Error(data.error || 'Request failed');
+  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
   return data;
 }
 
