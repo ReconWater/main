@@ -1,10 +1,15 @@
-# Backend API must resolve before any SPA fallback.
+# Backend API must resolve before any page fallback.
 /api/recon /.netlify/functions/api 200
 
-# Admin entry must resolve before the storefront SPA fallback.
+# Admin entry must resolve before storefront routes.
 /admin /admin.html 200
 /admin/ /admin.html 200
 /admin/* /admin.html 200
+
+# International ordering is a dedicated page, not a homepage section.
+/international /international.html 200
+/international/ /international.html 200
+/international/* /international.html 200
 
 # Storefront SPA fallback — keep LAST.
 /* /index.html 200

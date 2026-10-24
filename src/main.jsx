@@ -46,9 +46,6 @@ function Storefront() {
   const [selectedImage, setSelectedImage] = useState(0);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
-  const [intlQty, setIntlQty] = useState(1);
-  const [intlForm, setIntlForm] = useState({ name: '', email: '', address: '', city: '', region: '', postal: '', country: '', notes: '' });
-  const [intlStatus, setIntlStatus] = useState({ busy: false, message: '', ok: false });
 
   useEffect(() => {
     let alive = true;
@@ -77,35 +74,6 @@ function Storefront() {
   const selectedInStock = selectedPack.available == null || selectedPack.available > 0;
   const addToCart = () => { if (!selectedInStock) return; setCart(selectedPack); setCartOpen(true); };
 
-  const intlProductSubtotal = intlQty * 20;
-  const patchIntl = (key, value) => setIntlForm(current => ({ ...current, [key]: value }));
-  async function submitInternational(event) {
-    event.preventDefault();
-    if (intlQty < 1 || intlQty > 5) return;
-    setIntlStatus({ busy: true, message: '', ok: false });
-    try {
-      const data = await apiRequest('submit-international', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: intlForm.name,
-          email: intlForm.email,
-          quantity: intlQty,
-          shipping: {
-            address: intlForm.address,
-            city: intlForm.city,
-            region: intlForm.region,
-            postal: intlForm.postal,
-            country: intlForm.country,
-          },
-          notes: intlForm.notes,
-        }),
-      });
-      setIntlStatus({ busy: false, ok: true, message: `Request ${data.order_number || ''} received. We will review availability before fulfillment.` });
-    } catch (error) {
-      setIntlStatus({ busy: false, ok: false, message: error.message || 'International request could not be submitted.' });
-    }
-  }
 
   return <div className="app-shell">
     <div className="trustbar"><div className="container trustbar-inner">
@@ -116,7 +84,7 @@ function Storefront() {
 
     <header className="site-header"><div className="container nav-wrap">
       <a className="brand brand-logo-link" href="#top" aria-label="Recon Water home"><img className="brand-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a>
-      <nav className="desktop-nav" aria-label="Primary"><a href="#product">Product</a><a href="#international">International</a></nav>
+      <nav className="desktop-nav" aria-label="Primary"><a href="#product">Product</a><a href="/international/">International</a></nav>
       <button className="cart-trigger" onClick={() => setCartOpen(true)} aria-label="Open cart"><Icon name="cart"/><span>Cart</span><b>{cart?.qty || 0}</b></button>
     </div></header>
 
@@ -151,38 +119,7 @@ function Storefront() {
       <article><Icon name="truck"/><div><b>Canadian fulfilment</b><p>Clear shipping expectations without burying details in a policy page.</p></div></article>
     </div></section>
 
-    <section className="international-section" id="international"><div className="container international-grid">
-      <div className="international-copy">
-        <div className="eyebrow"><span/> International orders</div>
-        <h2>Simple international access.<br/><em>Up to five vials.</em></h2>
-        <p>International requests are intentionally limited to loose 30 mL vials. Pricing is fixed with no volume discounts.</p>
-        <div className="international-rules">
-          <div><strong>$20 USD</strong><span>per vial</span></div>
-          <div><strong>1–5</strong><span>vials maximum</span></div>
-          <div><strong>$30 CAD</strong><span>flat delivery</span></div>
-        </div>
-        <div className="international-note"><Icon name="info" size={18}/><span>International availability is reviewed before fulfillment. Canadian addresses must use the domestic ordering flow.</span></div>
-      </div>
-
-      <form className="international-card" onSubmit={submitInternational}>
-        <div className="international-card-head"><div><span>INTERNATIONAL REQUEST</span><h3>Bacteriostatic Water · 30 mL</h3></div><Icon name="truck" size={22}/></div>
-        <div className="intl-qty-row"><div><span>Quantity</span><small>Maximum 5 vials</small></div><div className="intl-stepper"><button type="button" onClick={()=>setIntlQty(q=>Math.max(1,q-1))} aria-label="Decrease international quantity">−</button><strong>{intlQty}</strong><button type="button" onClick={()=>setIntlQty(q=>Math.min(5,q+1))} aria-label="Increase international quantity">+</button></div></div>
-        <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(intlProductSubtotal)} USD</strong></div><div><span>Flat delivery</span><strong>$30.00 CAD</strong></div></div>
-        <div className="intl-form-grid">
-          <label><span>Name</span><input required minLength="2" maxLength="100" value={intlForm.name} onChange={e=>patchIntl('name',e.target.value)}/></label>
-          <label><span>Email</span><input required type="email" value={intlForm.email} onChange={e=>patchIntl('email',e.target.value)}/></label>
-          <label className="full"><span>Street address</span><input required minLength="5" value={intlForm.address} onChange={e=>patchIntl('address',e.target.value)}/></label>
-          <label><span>City</span><input required minLength="2" value={intlForm.city} onChange={e=>patchIntl('city',e.target.value)}/></label>
-          <label><span>State / region</span><input required value={intlForm.region} onChange={e=>patchIntl('region',e.target.value)}/></label>
-          <label><span>Postal / ZIP code</span><input required value={intlForm.postal} onChange={e=>patchIntl('postal',e.target.value)}/></label>
-          <label><span>Country</span><input required placeholder="United States" value={intlForm.country} onChange={e=>patchIntl('country',e.target.value)}/></label>
-          <label className="full"><span>Order note (optional)</span><textarea maxLength="500" value={intlForm.notes} onChange={e=>patchIntl('notes',e.target.value)}/></label>
-        </div>
-        {intlStatus.message&&<div className={`intl-status ${intlStatus.ok?'ok':'error'}`}>{intlStatus.message}</div>}
-        <button className="intl-submit" disabled={intlStatus.busy}>{intlStatus.busy?'Submitting…':`Submit international request · ${money(intlProductSubtotal)} USD`}<Icon name="chevron" size={17}/></button>
-        <p className="intl-disclaimer">No payment is collected through this form. Product subtotal is USD; delivery is a separate $30 CAD flat charge.</p>
-      </form>
-    </div></section></main>
+  </main>
 
     <div className={`cart-drawer ${cartOpen?'open':''}`} aria-hidden={!cartOpen}><button className="cart-scrim" onClick={()=>setCartOpen(false)} aria-label="Close cart"/><aside className="cart-panel"><div className="cart-head"><div><span>Your cart</span><small>{cart?`${cart.qty} ${cart.qty===1?'vial':'vials'}`:'Empty'}</small></div><button onClick={()=>setCartOpen(false)}>×</button></div>
       {!cart ? <div className="empty-cart"><Icon name="cart" size={28}/><h3>Your cart is empty</h3><p>Select a quantity and add it to your cart.</p></div> : <><div className="cart-product"><div className="cart-image"><img src={PRODUCT_IMAGES[0].src} alt="Hospira Bacteriostatic Water vial"/></div><div><b>Bacteriostatic Water for Injection USP</b><span>30 mL · {cart.label}</span><strong>${money(cart.price)} CAD</strong></div></div><div className="cart-summary"><div><span>Subtotal</span><b>${money(cart.price)} CAD</b></div><p>Shipping and applicable taxes calculated at checkout.</p></div><button className="checkout-button">Continue to checkout <Icon name="chevron" size={17}/></button><p className="checkout-disclaimer">Checkout order submission is a separate workflow.</p></>}
