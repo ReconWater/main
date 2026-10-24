@@ -5,6 +5,8 @@ const reply = (body,status=200) => new Response(JSON.stringify(body),{status,hea
 
 const normalizePromoCode = value => String(value || '').trim().toUpperCase();
 const todayIso = () => new Date().toISOString().slice(0,10);
+const isEthAddress = value => /^0x[a-fA-F0-9]{40}$/.test(String(value||'').trim());
+const isEthTxHash = value => /^0x[a-fA-F0-9]{64}$/.test(String(value||'').trim());
 const promoDiscount = (promo, subtotal) => {
   const base=Math.max(0,Number(subtotal||0));
   if(promo.discount_type==='percentage') return Math.min(base,Math.floor(base*Number(promo.discount_value)/100));
@@ -40,10 +42,35 @@ async function secureDomesticSubtotal(db,items){
   }
   return subtotal;
 }
+async function loadPaymentSettings(db){
+  const {data,error}=await db.from('payment_settings').select('*').eq('id',1).maybeSingle();
+  if(error) throw error;
+  return data||{id:1,etransfer_enabled:false,etransfer_email:'',etransfer_recipient_name:'',etransfer_note:'',usdc_eth_enabled:false,usdc_eth_address:'',usdc_note:''};
+}
+function paymentInstructions(order,settings){
+  const common={
+    order_id:order.id,
+    order_number:order.order_number,
+    method:order.payment_method,
+    status:order.payment_status,
+    amount_cents:Number(order.payment_amount_cents||0),
+    currency:order.payment_currency||((order.market==='international')?'USD':'CAD'),
+    reference:order.payment_reference||order.order_number,
+  };
+  if(order.payment_method==='etransfer'){
+    if(!settings.etransfer_enabled||!settings.etransfer_email) throw new Error('Interac e-Transfer is not configured');
+    return {...common,recipient_name:settings.etransfer_recipient_name||'Recon Water',destination:settings.etransfer_email,note:settings.etransfer_note||'Use the order reference in the transfer message.'};
+  }
+  if(order.payment_method==='usdc_eth'){
+    if(!settings.usdc_eth_enabled||!isEthAddress(settings.usdc_eth_address)) throw new Error('USDC on Ethereum is not configured');
+    return {...common,destination:settings.usdc_eth_address,network:'Ethereum',asset:'USDC',note:settings.usdc_note||'Send USDC only on Ethereum mainnet (ERC-20). Do not use another network.'};
+  }
+  throw new Error('Payment method is not configured');
+}
 
 const safeError = e => {
   const m=String(e?.message||'Request failed');
-  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total)/i.test(m)) return m;
+  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|Payment|Interac|USDC|International)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
 
@@ -75,6 +102,7 @@ export default async request => {
     try { const raw=await request.text(); if(raw.length>16000) return reply({error:'Request too large'},413);
       body=JSON.parse(raw||'{}'); if(!body||Array.isArray(body)||typeof body!=='object') throw Error(); }
     catch {return reply({error:'Invalid request data'},400);}
+
     if(action==='submit-order') {
       const secureSubtotal=await secureDomesticSubtotal(db,body.items);
       const promoResult=body.promo_code?await validatePromo(db,body.promo_code,secureSubtotal):null;
@@ -94,14 +122,14 @@ export default async request => {
         });
         if(error) throw error;
         orderId=data;
+        const orderUpdate={payment_method:'etransfer',payment_status:'not_requested'};
         if(promoResult){
-          const {error:updateError}=await db.from('orders').update({
-            promo_code:promoResult.promo.code,
-            promo_discount_cents:promoResult.discount,
-            promo_discount_currency:'CAD'
-          }).eq('id',orderId);
-          if(updateError) throw updateError;
+          orderUpdate.promo_code=promoResult.promo.code;
+          orderUpdate.promo_discount_cents=promoResult.discount;
+          orderUpdate.promo_discount_currency='CAD';
         }
+        const {error:updateError}=await db.from('orders').update(orderUpdate).eq('id',orderId);
+        if(updateError) throw updateError;
       } catch(e) {
         if(promoResult){
           const expected=Number(promoResult.promo.uses_count||0)+1;
@@ -114,14 +142,26 @@ export default async request => {
         }
         throw e;
       }
-      return reply({order_id:orderId,promo:promoResult?{code:promoResult.promo.code,discount_cents:promoResult.discount,final_subtotal_cents:promoResult.final}:null,message:'Request received. No payment has been collected and inventory is not reserved until approval.'});
+      return reply({order_id:orderId,promo:promoResult?{code:promoResult.promo.code,discount_cents:promoResult.discount,final_subtotal_cents:promoResult.final}:null,message:'Request received. Payment is not due until the request is approved.'});
     }
+
+    if(action==='payment-instructions'){
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('*').eq('id',orderId).eq('customer_id',user.id).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(!['awaiting_payment','paid'].includes(order.payment_status)) return reply({error:'Payment has not been requested for this order'},409);
+      const settings=await loadPaymentSettings(db);
+      return reply({instructions:paymentInstructions(order,settings)});
+    }
+
     const {data:admin,error:adminErr}=await db.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();
     if(adminErr) throw adminErr;
     if(!admin) return reply({error:'Administrator access required'},403);
     const rpc=async(name,params)=>{const {data,error}=await db.rpc(name,params);if(error)throw error;return data;};
+
     if(action==='dashboard') {
-      const [pr,pk,lo,ord,ev,alloc,prices,promos]=await Promise.all([
+      const [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings]=await Promise.all([
         db.from('products').select('*').eq('sku','BW-30ML'),
         db.from('product_packages').select('*').order('vials_per_pack'),
         db.from('inventory_lots').select('*').order('expiry_date'),
@@ -129,12 +169,13 @@ export default async request => {
         db.from('inventory_events_v2').select('*').order('created_at',{ascending:false}).limit(150),
         db.from('order_allocations_v2').select('*').order('created_at',{ascending:false}).limit(250),
         db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50),
-        db.from('promo_codes').select('*').order('created_at',{ascending:false})
+        db.from('promo_codes').select('*').order('created_at',{ascending:false}),
+        db.from('payment_settings').select('*').eq('id',1).maybeSingle()
       ]);
-      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos]) if(r.error)throw r.error;
+      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings]) if(r.error)throw r.error;
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
-        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[]});
+        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[],paymentSettings:paymentSettings.data||null});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -158,8 +199,16 @@ export default async request => {
       p_lot_id:body.lot_id,p_loose_delta:body.loose_delta,p_sealed_delta:body.sealed_delta,
       p_reason:body.reason,p_actor:user.id});return reply({ok:true});}
     if(action==='open-case') {await rpc('service_admin_open_case_v2',{p_lot_id:body.lot_id,p_actor:user.id});return reply({ok:true});}
-    if(action==='order-status') {await rpc('service_admin_order_transition_v2',{
-      p_order_id:body.order_id,p_status:body.status,p_actor:user.id});return reply({ok:true});}
+    if(action==='order-status') {
+      if(body.status==='fulfilled'){
+        const {data:order,error}=await db.from('orders').select('payment_method,payment_status').eq('id',body.order_id).maybeSingle();
+        if(error) throw error;
+        if(order?.payment_method && order.payment_status!=='paid') return reply({error:'Payment must be marked paid before fulfillment'},409);
+      }
+      await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
+      if(body.status==='cancelled') await db.from('orders').update({payment_status:'cancelled'}).eq('id',body.order_id).neq('payment_status','paid');
+      return reply({ok:true});
+    }
     if(action==='manual-order') {const id=await rpc('service_admin_manual_order_v2',{
       p_name:body.name,p_email:body.email,p_package_id:body.package_id,p_quantity:body.quantity,
       p_notes:body.notes||'',p_actor:user.id});return reply({order_id:id});}
@@ -181,6 +230,59 @@ export default async request => {
       else result=await db.from('promo_codes').insert(payload).select('*').single();
       if(result.error) throw result.error;
       return reply({promo:result.data});
+    }
+    if(action==='save-payment-settings'){
+      const etransferEnabled=!!body.etransfer_enabled;
+      const etransferEmail=String(body.etransfer_email||'').trim();
+      const recipient=String(body.etransfer_recipient_name||'').trim().slice(0,120);
+      const etransferNote=String(body.etransfer_note||'').trim().slice(0,500);
+      const usdcEnabled=!!body.usdc_eth_enabled;
+      const usdcAddress=String(body.usdc_eth_address||'').trim();
+      const usdcNote=String(body.usdc_note||'').trim().slice(0,500);
+      if(etransferEnabled && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(etransferEmail)||!recipient)) return reply({error:'Enter a valid Interac e-Transfer email and recipient name'},400);
+      if(usdcEnabled && !isEthAddress(usdcAddress)) return reply({error:'Enter a valid Ethereum wallet address for USDC'},400);
+      const payload={id:1,etransfer_enabled:etransferEnabled,etransfer_email:etransferEmail,etransfer_recipient_name:recipient,etransfer_note:etransferNote,usdc_eth_enabled:usdcEnabled,usdc_eth_address:usdcAddress,usdc_note:usdcNote,updated_by:user.id,updated_at:new Date().toISOString()};
+      const {data,error}=await db.from('payment_settings').upsert(payload,{onConflict:'id'}).select('*').single();
+      if(error) throw error;
+      return reply({settings:data});
+    }
+    if(action==='request-payment'){
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('*').eq('id',orderId).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(order.status!=='approved') return reply({error:'Payment can only be requested after approval'},409);
+      const method=order.market==='international'?'usdc_eth':'etransfer';
+      const currency=order.market==='international'?'USD':'CAD';
+      const settings=await loadPaymentSettings(db);
+      if(method==='etransfer' && (!settings.etransfer_enabled||!settings.etransfer_email)) return reply({error:'Interac e-Transfer is not enabled in Payment methods'},409);
+      if(method==='usdc_eth' && (!settings.usdc_eth_enabled||!isEthAddress(settings.usdc_eth_address))) return reply({error:'USDC on Ethereum is not enabled in Payment methods'},409);
+      const netProduct=Math.max(0,Number(order.subtotal_cents||0)-Number(order.promo_discount_cents||0));
+      const fixedIntl=netProduct+Number(order.shipping_cents||0);
+      const requested=Number(body.amount_cents);
+      let amount;
+      if(order.market==='international') amount=fixedIntl;
+      else {
+        amount=Number.isInteger(requested)?requested:netProduct;
+        if(amount<netProduct||amount>100000000) return reply({error:'Payment amount cannot be below the approved product total'},400);
+      }
+      const reference=String(order.order_number||order.id).slice(0,80);
+      const {data:updated,error:updateError}=await db.from('orders').update({payment_method:method,payment_status:'awaiting_payment',payment_amount_cents:amount,payment_currency:currency,payment_reference:reference,payment_requested_at:new Date().toISOString(),payment_tx_hash:null,paid_at:null}).eq('id',order.id).select('*').single();
+      if(updateError) throw updateError;
+      return reply({instructions:paymentInstructions(updated,settings)});
+    }
+    if(action==='mark-payment-paid'){
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('*').eq('id',orderId).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(order.payment_status!=='awaiting_payment') return reply({error:'Payment is not awaiting confirmation'},409);
+      const reference=String(body.reference||'').trim().slice(0,160);
+      const txHash=String(body.tx_hash||'').trim();
+      if(order.payment_method==='usdc_eth'&&!isEthTxHash(txHash)) return reply({error:'Enter the verified Ethereum transaction hash'},400);
+      const {error:updateError}=await db.from('orders').update({payment_status:'paid',payment_reference:reference||order.payment_reference||order.order_number,payment_tx_hash:order.payment_method==='usdc_eth'?txHash:null,paid_at:new Date().toISOString()}).eq('id',order.id);
+      if(updateError) throw updateError;
+      return reply({ok:true});
     }
     return reply({error:'Unknown action'},404);
   } catch(e) {

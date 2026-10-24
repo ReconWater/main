@@ -150,6 +150,94 @@ export async function handler(event) {
       });
     }
 
+    if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
+      let body;
+      try { body = JSON.parse(event.body || '{}'); }
+      catch { return json(400, { error: 'Invalid request data.' }); }
+
+      const name = String(body.name || '').trim();
+      const email = String(body.email || '').trim();
+      const notes = String(body.notes || '');
+      const packageId = String(body.package_id || '');
+      const promoCode = normalizePromoCode(body.promo_code);
+      const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
+      if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 1000 || !packageId) {
+        return json(400, { error: 'Invalid customer details.' });
+      }
+      if (!shipping) return json(400, { error: 'A complete Canadian delivery address is required.' });
+      const address = String(shipping.address || '').trim();
+      const city = String(shipping.city || '').trim();
+      const region = String(shipping.region || '').trim().toUpperCase();
+      const postal = String(shipping.postal || '').trim().toUpperCase();
+      const country = String(shipping.country || '').trim();
+      const regions = new Set(['AB','BC','MB','NB','NL','NT','NS','NU','ON','PE','QC','SK','YT']);
+      if (address.length < 5 || city.length < 2 || !regions.has(region) || !/^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ ]?\d[A-CEGHJ-NPRSTV-Z]\d$/.test(postal) || country.toLowerCase() !== 'canada' || JSON.stringify(shipping).length > 1200) {
+        return json(400, { error: 'A valid Canadian delivery address is required.' });
+      }
+
+      const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { count: recentCount, error: recentError } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('market', 'domestic').ilike('customer_email', email).gt('created_at', recentCutoff);
+      if (recentError) throw recentError;
+      if (Number(recentCount || 0) >= 3) return json(429, { error: 'Too many recent requests.' });
+
+      const { data: pack, error: packError } = await db.from('product_packages').select('id,product_id,code,sku,label,vials_per_pack,stock_kind,price_cents,active,max_per_request').eq('id', packageId).eq('active', true).maybeSingle();
+      if (packError) throw packError;
+      if (!pack || pack.price_cents == null) return json(409, { error: 'Selected package is unavailable.' });
+      const { data: product, error: productError } = await db.from('products').select('id,name,is_active').eq('id', pack.product_id).eq('is_active', true).maybeSingle();
+      if (productError) throw productError;
+      if (!product) return json(409, { error: 'Product unavailable.' });
+      const { data: lots, error: lotsError } = await db.from('inventory_lots').select('id,product_id,expiry_date,status,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved').eq('product_id', product.id);
+      if (lotsError) throw lotsError;
+      if (packageAvailability(pack, lots || []) < 1) return json(409, { error: 'Insufficient inventory for selected package.' });
+
+      const subtotalCents = Number(pack.price_cents);
+      const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotalCents) : null;
+      let promoClaimed = false;
+      if (promoResult) {
+        const currentUses = Number(promoResult.promo.uses_count || 0);
+        const { data: claimed, error: claimError } = await db.from('promo_codes').update({ uses_count: currentUses + 1, updated_at: new Date().toISOString() }).eq('id', promoResult.promo.id).eq('uses_count', currentUses).select('id').maybeSingle();
+        if (claimError) throw claimError;
+        if (!claimed) return json(409, { error: 'Promo code is invalid or unavailable.' });
+        promoClaimed = true;
+      }
+
+      let order = null;
+      try {
+        const insert = {
+          customer_name: name,
+          customer_email: email,
+          shipping: { address, city, region, postal, country: 'Canada' },
+          notes,
+          status: 'pending_review',
+          subtotal_cents: subtotalCents,
+          market: 'domestic',
+          subtotal_currency: 'CAD',
+          shipping_cents: 0,
+          shipping_currency: 'CAD',
+          payment_method: 'etransfer',
+          payment_status: 'not_requested',
+        };
+        if (promoResult) {
+          insert.promo_code = promoResult.promo.code;
+          insert.promo_discount_cents = promoResult.discount;
+          insert.promo_discount_currency = 'CAD';
+        }
+        const { data: created, error: orderError } = await db.from('orders').insert(insert).select('id,order_number').single();
+        if (orderError) throw orderError;
+        order = created;
+        const { error: itemError } = await db.from('order_items').insert({ order_id: order.id, product_id: product.id, product_name: product.name, sku: pack.sku, quantity: 1, unit_price_cents: subtotalCents, package_id: pack.id, package_label: pack.label, vials_per_pack: pack.vials_per_pack, stock_kind: pack.stock_kind });
+        if (itemError) throw itemError;
+      } catch (error) {
+        if (order?.id) { await db.from('order_items').delete().eq('order_id', order.id); await db.from('orders').delete().eq('id', order.id); }
+        if (promoClaimed && promoResult) {
+          const expected = Number(promoResult.promo.uses_count || 0) + 1;
+          await db.from('promo_codes').update({ uses_count: Math.max(0, expected - 1), updated_at: new Date().toISOString() }).eq('id', promoResult.promo.id).eq('uses_count', expected);
+        }
+        throw error;
+      }
+      return json(200, { order_id: order.id, order_number: order.order_number || null, promo: promoResult ? { code: promoResult.promo.code, discount_cents: promoResult.discount, final_subtotal_cents: promoResult.final } : null });
+    }
+
     if (event.httpMethod === 'POST' && mode === 'submit-international') {
       let body;
       try { body = JSON.parse(event.body || '{}'); }
@@ -237,6 +325,8 @@ export async function handler(event) {
           subtotal_currency: 'USD',
           shipping_cents: shippingCents,
           shipping_currency: 'USD',
+          payment_method: 'usdc_eth',
+          payment_status: 'not_requested',
         })
         .select('id,order_number')
         .single();
