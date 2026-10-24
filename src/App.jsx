@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
-import {ArrowRight,Check,ChevronDown,Droplet,Lock,LogOut,Menu,Minus,Plus,ShoppingBag,UserRound,X} from 'lucide-react';
+import {ArrowRight,Check,ChevronDown,Droplet,Globe2,Lock,LogOut,Menu,Minus,Plus,ShoppingBag,Truck,UserRound,X} from 'lucide-react';
 import {supabase,callApi,money} from './supabase';
 import {CANADIAN_PROVINCES,formatCanadianPostal} from './canada';
 import ClinicalGallery from './ClinicalGallery';
@@ -10,12 +10,13 @@ const AdminPanel=React.lazy(()=>import('./AdminPanel.jsx'));
 const toSection=id=>document.getElementById(id)?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
 const date=d=>new Date(d).toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric'});
 const statusLabels={pending_review:'Pending review',approved:'Approved / reserved',fulfilled:'Fulfilled',cancelled:'Cancelled'};
+const moneyCurrency=(cents,currency='CAD')=>cents==null?'—':new Intl.NumberFormat('en-CA',{style:'currency',currency}).format(Number(cents)/100);
 const getAvailable=p=>Math.max(0,Number(p?.available_packages)||0);
 const cartCountVials=vialCount;
 function Brand(){return <span className="brand"><span className="brand-logo"><Droplet size={24} strokeWidth={1.65}/></span><span className="brand-words"><strong>RECON<span>WATER</span></strong><small>ONTARIO · CANADA</small></span></span>}
 function Notice({message,clear}){return message?<div className={`notice ${message.error?'is-error':''}`} role="status"><span>{message.text}</span><button aria-label="Dismiss message" onClick={clear}><X size={17}/></button></div>:null}
 function Field({label,children}){return <label className="form-field"><span>{label}</span>{children}</label>}
-function MainShop({packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd}){
+function MainShop({packages,stock,selected,setSelected,packQty,setPackQty,cart,onAdd,international,onInternational}){
  const [expanded,setExpanded]=useState(null);
  const chosen=packages.find(p=>p.id===selected)||packages[0];
  const {remaining,inCart}=formatAvailability(chosen,cart,stock);
@@ -75,13 +76,37 @@ function MainShop({packages,stock,selected,setSelected,packQty,setPackQty,cart,o
       </div>
     </div>
   </div></section>
+  <InternationalSection offer={international} onRequest={onInternational}/>
  </main>;
+}
+
+function InternationalSection({offer,onRequest}){
+ const [quantity,setQuantity]=useState(1);
+ const available=Math.max(0,Number(offer?.available_packages)||0);
+ const max=Math.min(5,available);
+ const ready=Boolean(offer?.active&&offer?.price_cents===2000&&offer?.currency==='USD'&&max>0);
+ const qty=Math.min(Math.max(1,quantity),Math.max(1,max));
+ const productSubtotal=moneyCurrency((offer?.price_cents||2000)*qty,'USD');
+ return <section id="international" className="international-section"><div className="container international-shell">
+  <div className="international-copy">
+   <span className="clinical-kicker">INTERNATIONAL ORDERS</span>
+   <h2>Simple international access. <span>Five vials maximum.</span></h2>
+   <p>International requests are limited to loose 30 mL vials only. Pricing is fixed with no quantity discounts.</p>
+   <div className="international-rules"><div><strong>$20 USD</strong><small>per vial · fixed price</small></div><div><strong>1–5</strong><small>vials per international request</small></div><div><strong>$30 CAD</strong><small>flat delivery charge</small></div></div>
+  </div>
+  <div className="international-card">
+   <div className="international-card-head"><div className="international-icon"><Globe2 size={23}/></div><div><span>INTERNATIONAL REQUEST</span><strong>Bacteriostatic Water for Injection USP</strong><small>30 mL · loose vials only</small></div></div>
+   <div className="international-price-row"><div><span>PRODUCT SUBTOTAL · USD</span><strong>{productSubtotal}</strong><small>{qty} vial{qty!==1?'s':''} × $20 USD</small></div><div className="international-shipping"><Truck size={18}/><span>Delivery</span><strong>$30 CAD</strong></div></div>
+   <div className="international-actions"><div className="clinical-quantity" role="group" aria-label="International vial quantity"><button type="button" aria-label="Decrease vial quantity" disabled={qty<=1} onClick={()=>setQuantity(Math.max(1,qty-1))}><Minus size={17}/></button><output>{qty}</output><button type="button" aria-label="Increase vial quantity" disabled={!ready||qty>=max||qty>=5} onClick={()=>setQuantity(Math.min(5,max,qty+1))}><Plus size={17}/></button></div><button className="primary-button" disabled={!ready} onClick={()=>onRequest(qty)}>Request international order <ArrowRight size={18}/></button></div>
+   <p className="international-note">Destination eligibility is reviewed before confirmation. Product charges are in USD; the flat delivery charge is CAD. No payment is collected online.</p>
+  </div>
+ </div></section>
 }
 
 export default function App(){
  const [route,setRoute]=useState(location.pathname.startsWith('/admin')?'admin':'shop');
- const [menu,setMenu]=useState(false),[authOpen,setAuthOpen]=useState(false),[recoveryOpen,setRecoveryOpen]=useState(false),[cartOpen,setCartOpen]=useState(false),[checkout,setCheckout]=useState(false),[ordersOpen,setOrdersOpen]=useState(false);
- const [session,setSession]=useState(null),[packages,setPackages]=useState([]),[stock,setStock]=useState({loose:0,sealed:0}),[selected,setSelected]=useState(null),[packQty,setPackQty]=useState(1);
+ const [menu,setMenu]=useState(false),[authOpen,setAuthOpen]=useState(false),[recoveryOpen,setRecoveryOpen]=useState(false),[cartOpen,setCartOpen]=useState(false),[checkout,setCheckout]=useState(false),[internationalCheckout,setInternationalCheckout]=useState(false),[internationalQty,setInternationalQty]=useState(1),[ordersOpen,setOrdersOpen]=useState(false);
+ const [session,setSession]=useState(null),[packages,setPackages]=useState([]),[international,setInternational]=useState(null),[stock,setStock]=useState({loose:0,sealed:0}),[selected,setSelected]=useState(null),[packQty,setPackQty]=useState(1);
  const [cart,setCart]=useState([]),[message,setMessage]=useState(null),[orders,setOrders]=useState([]);
  const cartDialogRef=useDialogFocus(cartOpen,()=>setCartOpen(false));
  const ordersDialogRef=useDialogFocus(ordersOpen,()=>setOrdersOpen(false));
@@ -89,8 +114,8 @@ export default function App(){
  const navigate=to=>{history.pushState({},'',to==='admin'?'/admin':'/');setRoute(to);setMenu(false);window.scrollTo(0,0);};
  useEffect(()=>{const pop=()=>setRoute(location.pathname.startsWith('/admin')?'admin':'shop');window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[]);
  const refresh=useCallback(async()=>{
-  try{const res=await fetch('/.netlify/functions/api?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
-    setPackages(data.packages||[]);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
+  try{const res=await fetch('/api/recon?action=catalogue',{cache:'no-store'});if(!res.ok)throw Error('Catalogue temporarily unavailable');const data=await res.json();
+    setPackages(data.packages||[]);setInternational(data.international||null);setStock(data.stock||{loose:0,sealed:0});setSelected(s=>data.packages?.some(p=>p.id===s)?s:(data.packages?.[0]?.id||null));
   }catch(e){alert(e.message,true)}
  },[]);
  useEffect(()=>{refresh();if(!supabase)return;supabase.auth.getSession().then(({data})=>setSession(data.session));const {data:{subscription}}=supabase.auth.onAuthStateChange((event,s)=>{setSession(s);if(event==='PASSWORD_RECOVERY')setRecoveryOpen(true)});return()=>subscription.unsubscribe()},[refresh]);
@@ -111,22 +136,24 @@ export default function App(){
    return [...c.filter(x=>x.package_id!==p.id),{package_id:p.id,quantity:current+1,stock_kind:p.stock_kind,vials_per_pack:p.vials_per_pack}];
  });
  const begin=()=>{setCartOpen(false);if(!session){setAuthOpen(true);alert('Please sign in with a verified account to submit a request.');return}setCheckout(true)};
- const loadOrders=async()=>{if(!supabase)return;const {data,error}=await supabase.from('orders').select('id,order_number,created_at,status,subtotal_cents,order_items(product_name,sku,quantity,package_label,vials_per_pack)').order('created_at',{ascending:false}).limit(40);if(error)alert('Could not retrieve request history.',true);else setOrders(data||[])};
+ const beginInternational=qty=>{setInternationalQty(Math.min(5,Math.max(1,Number(qty)||1)));if(!session){setAuthOpen(true);alert('Please sign in with a verified account to submit an international request.');return}setInternationalCheckout(true)};
+ const loadOrders=async()=>{if(!supabase)return;const {data,error}=await supabase.from('orders').select('id,order_number,created_at,status,market,product_currency,shipping_cents,shipping_currency,subtotal_cents,order_items(product_name,sku,quantity,package_label,vials_per_pack,unit_price_cents,unit_currency)').order('created_at',{ascending:false}).limit(40);if(error)alert('Could not retrieve request history.',true);else setOrders(data||[])};
  const signOut=async()=>{await supabase?.auth.signOut();setCart([]);setOrders([]);alert('Signed out successfully')};
  const navClick=id=>{if(route==='admin'){navigate('shop');setTimeout(()=>toSection(id),90)}else toSection(id);setMenu(false)};
  return <>
   <header className="site-header"><div className="container header-row"><button className="brand-button" onClick={()=>navigate('shop')} aria-label="Recon Water home"><Brand/></button>
-   <nav className={menu?'nav-links nav-open':'nav-links'} aria-label="Primary navigation"><button onClick={()=>navClick('product')}>Product</button><button onClick={()=>navClick('details')}>Details</button></nav>
+   <nav className={menu?'nav-links nav-open':'nav-links'} aria-label="Primary navigation"><button onClick={()=>navClick('product')}>Canada</button><button onClick={()=>navClick('international')}>International</button><button onClick={()=>navClick('details')}>Details</button></nav>
    <div className="header-tools"><button className="text-tool" onClick={()=>session?(loadOrders(),setOrdersOpen(true)):setAuthOpen(true)}><UserRound size={19}/><span>{session?'My requests':'Account'}</span></button><button className="cart-trigger" aria-label="Open request cart" onClick={()=>setCartOpen(true)}><ShoppingBag size={19}/><span>{cart.reduce((n,i)=>n+i.quantity,0)}</span></button><button className="mobile-trigger" aria-expanded={menu} aria-label="Toggle navigation" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></div>
   </div></header>
-  {route==='shop'?<MainShop packages={packages} stock={stock} selected={selected} setSelected={setSelected} packQty={packQty} setPackQty={setPackQty} cart={cart} onAdd={add}/>:<React.Suspense fallback={<main className="loading-admin">Loading administrator workspace…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={alert} onSignOut={signOut} reloadPublic={refresh}/></React.Suspense>}
+  {route==='shop'?<MainShop packages={packages} stock={stock} selected={selected} setSelected={setSelected} packQty={packQty} setPackQty={setPackQty} cart={cart} onAdd={add} international={international} onInternational={beginInternational}/>:<React.Suspense fallback={<main className="loading-admin">Loading administrator workspace…</main>}><AdminPanel session={session} openAuth={()=>setAuthOpen(true)} toast={alert} onSignOut={signOut} reloadPublic={refresh}/></React.Suspense>}
   <footer className="site-footer"><div className="container minimal-footer"><div><strong>RECON WATER</strong><span>Ontario, Canada</span></div><p>Independent operator; not affiliated with Pfizer or Hospira. Product requests are subject to review. No payment is collected online.</p><span>© {new Date().getFullYear()} Recon Water</span></div></footer>
   <Notice message={message} clear={()=>setMessage(null)}/>
   {cartOpen&&<div className="scrim" onMouseDown={e=>e.target===e.currentTarget&&setCartOpen(false)}><aside ref={cartDialogRef} className="cart-drawer" role="dialog" aria-modal="true" aria-label="Request cart"><div className="drawer-header"><div><span className="section-eyebrow">YOUR SELECTION</span><h2>Request cart.</h2></div><button className="icon-button" aria-label="Close cart" onClick={()=>setCartOpen(false)}><X/></button></div><div className="drawer-lines">{liveCart.length?liveCart.map(p=><div className="drawer-line" key={p.id}><div className="mini-product"><Droplet size={24}/></div><div className="drawer-detail"><strong>{p.label}</strong><small>{p.vials_per_pack} × 30 mL · {money(p.price_cents)} per package</small><div className="mini-stepper"><button aria-label={`Remove one ${p.label}`} onClick={()=>adjust(p,-1)}><Minus size={14}/></button><span>{p.quantity}</span><button aria-label={`Add one ${p.label}`} onClick={()=>adjust(p,1)}><Plus size={14}/></button></div></div><strong>{money(p.quantity*p.price_cents)}</strong></div>):<div className="empty-state"><ShoppingBag size={38}/><h3>Your request is empty</h3><p>Select a packaging format to continue.</p></div>}</div>{liveCart.length>0&&<div className="drawer-bottom"><div className="drawer-summary"><span>{cartCountVials(cart)} total vials · Product subtotal</span><strong>{money(subtotal)}</strong></div><p>Packaging and product subtotal only. Taxes, delivery, eligibility and fulfillment are reviewed separately.</p><button className="primary-button" onClick={begin}>Continue request <ArrowRight size={18}/></button></div>}</aside></div>}
   {authOpen&&<Auth close={()=>setAuthOpen(false)} alert={alert}/>}
   {recoveryOpen&&<Recovery close={()=>setRecoveryOpen(false)} alert={alert}/>}
   {checkout&&<Checkout close={()=>setCheckout(false)} session={session} items={liveCart} subtotal={subtotal} alert={alert} finished={()=>{setCheckout(false);setCart([]);refresh()}}/>}
-  {ordersOpen&&<div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&setOrdersOpen(false)}><section ref={ordersDialogRef} className="dialog order-history" role="dialog" aria-modal="true" aria-label="Your requests"><button className="dialog-x" onClick={()=>setOrdersOpen(false)} aria-label="Close requests"><X/></button><span className="section-eyebrow">ACCOUNT</span><h2>Your requests</h2><p>Requests are not sales or payment confirmations.</p>{orders.length?orders.map(o=><div className="history-row" key={o.id}><div><strong>{o.order_number}</strong><small>{date(o.created_at)} · {(o.order_items||[]).map(i=>`${i.quantity} × ${i.package_label||'Single vial'}`).join(', ')}</small></div><div><span>{statusLabels[o.status]}</span><strong>{money(o.subtotal_cents)}</strong></div></div>):<p>No requests recorded.</p>}<button className="secondary-button full" onClick={()=>{setOrdersOpen(false);signOut()}}><LogOut size={16}/> Sign out</button></section></div>}
+  {internationalCheckout&&<InternationalCheckout close={()=>setInternationalCheckout(false)} session={session} quantity={internationalQty} alert={alert} finished={()=>{setInternationalCheckout(false);refresh()}}/>}
+  {ordersOpen&&<div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&setOrdersOpen(false)}><section ref={ordersDialogRef} className="dialog order-history" role="dialog" aria-modal="true" aria-label="Your requests"><button className="dialog-x" onClick={()=>setOrdersOpen(false)} aria-label="Close requests"><X/></button><span className="section-eyebrow">ACCOUNT</span><h2>Your requests</h2><p>Requests are not sales or payment confirmations.</p>{orders.length?orders.map(o=><div className="history-row" key={o.id}><div><strong>{o.order_number}</strong><small>{date(o.created_at)} · {o.market==='international'?'International · ':''}{(o.order_items||[]).map(i=>`${i.quantity} × ${i.package_label||'Single vial'}`).join(', ')}</small></div><div><span>{statusLabels[o.status]}</span><strong>{moneyCurrency(o.subtotal_cents,o.product_currency||'CAD')}</strong>{o.shipping_cents>0&&<small>+ {moneyCurrency(o.shipping_cents,o.shipping_currency||'CAD')} delivery</small>}</div></div>):<p>No requests recorded.</p>}<button className="secondary-button full" onClick={()=>{setOrdersOpen(false);signOut()}}><LogOut size={16}/> Sign out</button></section></div>}
  </>;
 }
 function Auth({close,alert}){
@@ -145,6 +172,14 @@ function Checkout({close,session,items,subtotal,alert,finished}){
  const [name,setName]=useState(''),[address,setAddress]=useState(''),[city,setCity]=useState(''),[region,setRegion]=useState('ON'),[postal,setPostal]=useState(''),[notes,setNotes]=useState(''),[busy,setBusy]=useState(false);
  const submit=async e=>{e.preventDefault();setBusy(true);try{const res=await callApi('submit-order',session,{name,shipping:{address:address.trim(),city:city.trim(),region,postal:formatCanadianPostal(postal),country:'Canada'},notes,items:items.map(p=>({package_id:p.id,quantity:p.quantity}))});alert(`${res.message} Reference ${res.order_id.slice(0,8).toUpperCase()}.`);finished()}catch(e){alert(e.message||'Unable to submit',true)}finally{setBusy(false)}};
  return <div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&!busy&&close()}><div ref={dialogRef} className="dialog checkout-dialog" role="dialog" aria-modal="true" aria-label="Submit request"><button className="dialog-x" onClick={close} aria-label="Close" disabled={busy}><X/></button><span className="section-eyebrow">REVIEW REQUEST</span><h2>Submission details.</h2><div className="checkout-top">{items.map(p=><div key={p.id}><span>{p.quantity} × {p.label} ({p.quantity*p.vials_per_pack} vials)</span><strong>{money(p.quantity*p.price_cents)}</strong></div>)}<div className="checkout-total"><span>Product subtotal · CAD</span><strong>{money(subtotal)}</strong></div></div><form onSubmit={submit} className="form-stack"><Field label="Full name"><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></Field><Field label="Account email"><input disabled value={session?.user?.email||''}/></Field><Field label="Street address"><input required minLength={5} maxLength={150} value={address} onChange={e=>setAddress(e.target.value)}/></Field><div className="field-pair"><Field label="City"><input required minLength={2} maxLength={100} value={city} onChange={e=>setCity(e.target.value)}/></Field><Field label="Province / Territory"><select value={region} onChange={e=>setRegion(e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></Field></div><Field label="Canadian postal code"><input required value={postal} maxLength={7} placeholder="K1A 0B1" onChange={e=>setPostal(e.target.value.toUpperCase())} pattern="[A-Za-z][0-9][A-Za-z][ ]?[0-9][A-Za-z][0-9]"/></Field><Field label="Notes (optional)"><textarea rows={2} maxLength={1000} value={notes} onChange={e=>setNotes(e.target.value)}/></Field><p className="checkout-warning">No payment is collected. Requests do not reserve stock. Approval requires eligibility and inventory review.</p><button className="primary-button" disabled={busy}>{busy?'Submitting…':'Submit request'} <ArrowRight size={17}/></button></form></div></div>;
+}
+
+function InternationalCheckout({close,session,quantity,alert,finished}){
+ const dialogRef=useDialogFocus(true,close);
+ const [name,setName]=useState(''),[address,setAddress]=useState(''),[city,setCity]=useState(''),[region,setRegion]=useState(''),[postal,setPostal]=useState(''),[country,setCountry]=useState(''),[notes,setNotes]=useState(''),[busy,setBusy]=useState(false);
+ const qty=Math.min(5,Math.max(1,Number(quantity)||1));
+ const submit=async e=>{e.preventDefault();setBusy(true);try{const res=await callApi('submit-international-order',session,{name,shipping:{address:address.trim(),city:city.trim(),region:region.trim(),postal:postal.trim(),country:country.trim()},quantity:qty,notes});alert(`${res.message} Reference ${res.order_id.slice(0,8).toUpperCase()}.`);finished()}catch(e){alert(e.message||'Unable to submit international request',true)}finally{setBusy(false)}};
+ return <div className="scrim centered" onMouseDown={e=>e.target===e.currentTarget&&!busy&&close()}><div ref={dialogRef} className="dialog checkout-dialog international-checkout" role="dialog" aria-modal="true" aria-label="Submit international request"><button className="dialog-x" onClick={close} aria-label="Close" disabled={busy}><X/></button><span className="section-eyebrow">INTERNATIONAL ORDER</span><h2>International delivery details.</h2><div className="checkout-top"><div><span>{qty} × 30 mL vial{qty!==1?'s':''}</span><strong>{moneyCurrency(qty*2000,'USD')}</strong></div><div><span>Flat delivery charge · CAD</span><strong>{moneyCurrency(3000,'CAD')}</strong></div><div className="international-currency-note">Product and delivery are charged in separate currencies; no conversion is implied on this request.</div></div><form onSubmit={submit} className="form-stack"><Field label="Full name"><input required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></Field><Field label="Account email"><input disabled value={session?.user?.email||''}/></Field><Field label="Street address"><input required minLength={5} maxLength={150} value={address} onChange={e=>setAddress(e.target.value)}/></Field><div className="field-pair"><Field label="City"><input required minLength={2} maxLength={100} value={city} onChange={e=>setCity(e.target.value)}/></Field><Field label="State / Region"><input maxLength={100} value={region} onChange={e=>setRegion(e.target.value)}/></Field></div><div className="field-pair"><Field label="Postal / ZIP code"><input maxLength={30} value={postal} onChange={e=>setPostal(e.target.value)}/></Field><Field label="Country"><input required minLength={2} maxLength={80} placeholder="United States" value={country} onChange={e=>setCountry(e.target.value)}/></Field></div><Field label="Notes (optional)"><textarea rows={2} maxLength={1000} value={notes} onChange={e=>setNotes(e.target.value)}/></Field><p className="checkout-warning">Maximum five vials. No volume pricing applies. Destination eligibility and fulfillment are reviewed before confirmation. No payment is collected online.</p><button className="primary-button" disabled={busy}>{busy?'Submitting…':'Submit international request'} <ArrowRight size={17}/></button></form></div></div>;
 }
 
 function Recovery({close,alert}){

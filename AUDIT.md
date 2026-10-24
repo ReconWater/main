@@ -8,7 +8,7 @@
 - Interactions are DOM-event based rather than component/state based.
 - Product page lacks a true image gallery and a compact purchase-focused hero.
 
-## Marchese reference
+## Marchese referenceaa
 Useful patterns:
 - Real product photograph is the visual anchor.
 - Price, vendor, quantity and Add to Cart are grouped tightly.

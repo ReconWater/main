@@ -1,3 +1,10 @@
 [build]
   command = "npm run build"
   publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# All rewrites are intentionally kept in public/_redirects so their order is explicit.
+# /api/recon must stay before the storefront catch-all.
