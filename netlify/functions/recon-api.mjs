@@ -110,19 +110,112 @@ export async function handler(event) {
       let body;
       try { body = JSON.parse(event.body || '{}'); }
       catch { return json(400, { error: 'Invalid request data.' }); }
+
       const quantity = Number(body.quantity);
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) return json(400, { error: 'International orders are limited to 1–5 vials.' });
-      const { data, error } = await db.rpc('service_submit_international_order_v1', {
-        p_email: body.email,
-        p_name: body.name,
-        p_shipping: body.shipping,
-        p_quantity: quantity,
-        p_notes: body.notes || '',
-      });
-      if (error) throw error;
-      const { data: order, error: orderError } = await db.from('orders').select('order_number').eq('id', data).maybeSingle();
+      const name = String(body.name || '').trim();
+      const email = String(body.email || '').trim();
+      const notes = String(body.notes || '');
+      const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
+
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) {
+        return json(400, { error: 'International orders are limited to 1–5 vials.' });
+      }
+      if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 500) {
+        return json(400, { error: 'Invalid customer details.' });
+      }
+      if (!shipping) return json(400, { error: 'A complete international delivery address is required.' });
+
+      const address = String(shipping.address || '').trim();
+      const city = String(shipping.city || '').trim();
+      const region = String(shipping.region || '').trim();
+      const postal = String(shipping.postal || '').trim();
+      const country = String(shipping.country || '').trim();
+      if (address.length < 5 || city.length < 2 || region.length < 1 || postal.length < 2 || country.length < 2 || JSON.stringify(shipping).length > 1200) {
+        return json(400, { error: 'A complete international delivery address is required.' });
+      }
+      if (['canada', 'ca', 'can'].includes(country.toLowerCase())) {
+        return json(400, { error: 'Canadian addresses must use the domestic ordering flow.' });
+      }
+
+      const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      const { count: recentCount, error: recentError } = await db
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('market', 'international')
+        .ilike('customer_email', email)
+        .gt('created_at', recentCutoff);
+      if (recentError) throw recentError;
+      if (Number(recentCount || 0) >= 3) return json(429, { error: 'Too many recent international requests.' });
+
+      const { data: product, error: productError } = await db
+        .from('products')
+        .select('id,name')
+        .eq('sku', 'BW-30ML')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (productError) throw productError;
+      if (!product) return json(409, { error: 'Product unavailable.' });
+
+      const { data: singlePack, error: packError } = await db
+        .from('product_packages')
+        .select('id')
+        .eq('product_id', product.id)
+        .eq('code', 'single')
+        .maybeSingle();
+      if (packError) throw packError;
+      if (!singlePack) return json(409, { error: 'International format unavailable.' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: lots, error: lotsError } = await db
+        .from('inventory_lots')
+        .select('loose_on_hand,loose_reserved')
+        .eq('product_id', product.id)
+        .eq('status', 'available')
+        .gt('expiry_date', today);
+      if (lotsError) throw lotsError;
+      const freeLoose = (lots || []).reduce((sum, lot) => sum + Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)), 0);
+      if (freeLoose < quantity) return json(409, { error: 'Insufficient inventory for selected quantity.' });
+
+      // Fixed international commercial rules are defined only here on the server.
+      const unitPriceCents = 2000; // USD $20.00 per vial
+      const shippingCents = 3000; // CAD $30.00 flat delivery
+
+      const { data: order, error: orderError } = await db
+        .from('orders')
+        .insert({
+          customer_name: name,
+          customer_email: email,
+          shipping,
+          notes,
+          status: 'pending_review',
+          subtotal_cents: quantity * unitPriceCents,
+          market: 'international',
+          subtotal_currency: 'USD',
+          shipping_cents: shippingCents,
+          shipping_currency: 'CAD',
+        })
+        .select('id,order_number')
+        .single();
       if (orderError) throw orderError;
-      return json(200, { order_id: data, order_number: order?.order_number || null });
+
+      const { error: itemError } = await db.from('order_items').insert({
+        order_id: order.id,
+        product_id: product.id,
+        product_name: product.name,
+        sku: 'RW-INTL-BAC-01',
+        quantity,
+        unit_price_cents: unitPriceCents,
+        package_id: singlePack.id,
+        package_label: 'International single vial',
+        vials_per_pack: 1,
+        stock_kind: 'loose',
+      });
+      if (itemError) {
+        await db.from('orders').delete().eq('id', order.id);
+        throw itemError;
+      }
+
+      return json(200, { order_id: order.id, order_number: order.order_number || null });
     }
 
     if (event.httpMethod === 'GET' && mode === 'admin') {
