@@ -45,7 +45,6 @@ function App(){
   const [selectedImage, setSelectedImage] = useState(0);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
-  const [faq, setFaq] = useState(0);
 
   const unit = useMemo(() => selectedPack.price / selectedPack.qty, [selectedPack]);
   const addToCart = () => { setCart(selectedPack); setCartOpen(true); };
@@ -69,8 +68,6 @@ function App(){
         <nav className="desktop-nav" aria-label="Primary">
           <a href="#product">Product</a>
           <a href="#why">Why us</a>
-          <a href="#shipping">Shipping</a>
-          <a href="#faq">FAQ</a>
         </nav>
         <button className="cart-trigger" onClick={()=>setCartOpen(true)} aria-label="Open cart">
           <Icon name="cart" /> <span>Cart</span><b>{cart?.qty || 0}</b>
@@ -143,43 +140,7 @@ function App(){
         </div>
       </section>
 
-      <section className="shipping-section" id="shipping">
-        <div className="container shipping-shell">
-          <div className="shipping-copy"><span className="section-tag light">FULFILMENT</span><h2>Shipping that reads like an answer, not a policy manual.</h2><p>Keep the checkout promise simple. Show the rate and estimated handling window directly in the purchase flow once your final carrier rules are confirmed.</p></div>
-          <div className="shipping-cards">
-            <div><Icon name="truck"/><span>Domestic shipping</span><b>Canada-wide</b><small>Final rates calculated at checkout.</small></div>
-            <div><Icon name="box"/><span>Packaging</span><b>Protective</b><small>Packaged to reduce transit damage.</small></div>
-            <div><Icon name="check"/><span>Order updates</span><b>Tracked</b><small>Confirmation and shipment status by email.</small></div>
-          </div>
-        </div>
-      </section>
-
-      <section className="faq-section" id="faq">
-        <div className="container faq-grid">
-          <div><span className="section-tag">FAQ</span><h2>Common questions</h2><p>Short, useful answers instead of several pages of repetitive copy.</p></div>
-          <div className="faq-list">
-            {[
-              ['What exactly is being sold?','Bacteriostatic Water for Injection USP in a 30 mL multidose vial. The product record displayed on the site is DIN 00038202.'],
-              ['Who manufactures it?','The Canadian Drug Product Database lists Pfizer Canada ULC for DIN 00038202. Hospira branding may appear on the physical vial and packaging.'],
-              ['Can I purchase larger quantities?','The interface supports single vials and multi-vial quantities. Business or wholesale orders can be routed through a separate inquiry workflow if required.'],
-              ['What is your return policy?','Because this is a medical product, the final return policy should reflect applicable law, product integrity requirements, and your operating procedures.']
-            ].map((item,index)=><div className={`faq-item ${faq===index?'open':''}`} key={item[0]}>
-              <button onClick={()=>setFaq(faq===index?-1:index)}><span>{item[0]}</span><Icon name={faq===index?'minus':'plus'} size={18}/></button>
-              <div className="faq-answer"><p>{item[1]}</p></div>
-            </div>)}
-          </div>
-        </div>
-      </section>
-
-      <section className="support-cta">
-        <div className="container support-inner"><div><span>Need help with an order?</span><h2>Canadian customer support.</h2></div><a href="mailto:support@example.ca">Contact support <Icon name="chevron" size={17}/></a></div>
-      </section>
     </main>
-
-    <footer>
-      <div className="container footer-top"><div className="footer-brand"><a className="brand footer-logo-link" href="#top" aria-label="Recon Water home"><img className="footer-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a><p>A focused Canadian storefront for bacteriostatic water.</p></div><div><b>Shop</b><a href="#product">30 mL vial</a><a href="#product">Quantity pricing</a></div><div><b>Information</b><a href="#why">Product details</a><a href="#shipping">Shipping</a><a href="#faq">FAQ</a></div><div><b>Legal</b><a href="#">Terms</a><a href="#">Privacy</a><a href="#">Returns</a></div></div>
-      <div className="container footer-bottom"><span>© 2026 Recon Water</span><span>Product sales subject to applicable Canadian laws and regulations.</span></div>
-    </footer>
 
     <div className={`cart-drawer ${cartOpen?'open':''}`} aria-hidden={!cartOpen}>
       <button className="cart-scrim" onClick={()=>setCartOpen(false)} aria-label="Close cart"/>
