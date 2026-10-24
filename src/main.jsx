@@ -16,10 +16,10 @@ const PRODUCT_IMAGES = [
 ];
 
 const PACKS = [
-  { id: 'single', label: 'Single vial', qty: 1, price: 13, note: '$13.00 / vial' },
-  { id: 'five', label: '5 vials', qty: 5, price: 60, note: '$12.00 / vial' },
-  { id: 'ten', label: '10 vials', qty: 10, price: 110, note: '$11.00 / vial', badge: 'Popular' },
-  { id: 'case', label: 'Factory case', qty: 25, price: 300, note: '$12.00 / vial', badge: '25 vials' }
+  { id: 'single', label: 'Single vial', qty: 1, price: 15, note: '$15.00 / vial' },
+  { id: 'five', label: '5 vials', qty: 5, price: 70, note: '$14.00 / vial' },
+  { id: 'ten', label: '10 vials', qty: 10, price: 130, note: '$13.00 / vial', badge: 'Popular' },
+  { id: 'case', label: 'Factory case', qty: 25, price: 300, note: '$12.00 / vial', badge: 'Best value' }
 ];
 
 function Icon({name, size=20}) {
