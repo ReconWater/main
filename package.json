@@ -1,5 +1,5 @@
 {
-  "name": "bac-water-direct",
+  "name": "recon-water",
   "private": true,
   "version": "2.0.0",
   "type": "module",
@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@supabase/supabase-js": "^2.57.4"
   },
   "devDependencies": {
     "vite": "^7.1.12"
