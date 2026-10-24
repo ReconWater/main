@@ -1,0 +1,27 @@
+.clinical-gallery{min-width:0;width:100%}
+.clinical-gallery-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#7a929c;font-size:10px;letter-spacing:.14em;font-weight:800;margin-bottom:13px}
+.clinical-gallery-stage{height:clamp(430px,43vw,600px);border:1px solid #dce6e9;border-radius:16px;background:radial-gradient(ellipse at 53% 35%,#fff 0%,#f7f9fa 54%,#e8eef0 100%);display:grid;place-items:center;overflow:hidden;position:relative}
+.clinical-gallery-stage:before{content:"";position:absolute;inset:26px;border:1px solid #e4edef;border-radius:8px;pointer-events:none}
+.clinical-gallery-photo{position:relative;width:100%;height:100%;border:0;background:transparent;padding:35px;display:grid;place-items:center;cursor:zoom-in}
+.clinical-gallery-photo img{height:100%;max-height:530px;max-width:100%;object-fit:contain;filter:drop-shadow(0 25px 20px #1f415221)}
+.clinical-zoom{position:absolute;right:17px;bottom:16px;display:flex;gap:7px;align-items:center;border:1px solid #d9e4e7;border-radius:8px;background:#ffffffed;padding:11px 12px;font-size:11px;font-weight:800;color:#1d596f}
+.clinical-no-photo{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:30px;text-align:center;position:relative;color:#406b7b}
+.clinical-no-photo-symbol{width:98px;height:98px;border-radius:50%;border:1px solid #c6dce4;background:#f7fbfc;display:grid;place-items:center;color:#3a8398;box-shadow:0 12px 38px #24536b0a}
+.clinical-art-tag{font-size:clamp(70px,8vw,112px);line-height:1;font-weight:800;letter-spacing:-.09em;color:#1a4354;margin:5px 0 2px}
+.clinical-art-tag span{font-size:.34em;letter-spacing:-.04em;margin-left:6px;color:#6b929f}
+.clinical-no-photo>strong{font-size:13px;letter-spacing:-.015em;color:#3f6575}
+.clinical-placeholder-disclosure{color:#94a8af;font-size:10px;line-height:1.5;margin-top:22px}
+.clinical-gallery-thumbs{display:flex;gap:9px;margin-top:13px;overflow-x:auto}
+.clinical-gallery-thumbs button{min-width:120px;display:flex;gap:8px;align-items:center;border:1px solid #dce6e9;background:#fff;border-radius:8px;padding:7px 10px;color:#5c7f8c;font-size:10px}
+.clinical-gallery-thumbs button.is-active{border-color:#287c91;box-shadow:inset 0 0 0 1px #287c91}
+.clinical-gallery-thumbs img{width:38px;height:55px;object-fit:contain}
+.clinical-lightbox{position:fixed;inset:0;z-index:120;background:#0b2537dc;display:grid;place-items:center;padding:18px}
+.clinical-lightbox-panel{background:#fff;border-radius:14px;width:min(940px,100%);max-height:95dvh;display:flex;flex-direction:column;padding:16px 22px;overflow:auto}
+.clinical-lightbox-panel>img{object-fit:contain;width:100%;max-height:72dvh;min-height:0}
+.clinical-lightbox-top,.clinical-lightbox-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:#315e71;font-weight:800}
+.clinical-lightbox-top{padding-bottom:12px}
+.clinical-lightbox-top button,.clinical-lightbox-controls button{display:grid;place-items:center;background:#eef5f6;border:1px solid #d9e6ea;border-radius:8px;width:40px;height:40px;color:#27596e}
+.clinical-lightbox-controls{justify-content:center;gap:24px;margin-top:12px}
+@media(max-width:800px){.clinical-gallery-stage{height:380px}}
+@media(max-width:480px){.clinical-gallery-head{margin-bottom:9px;font-size:9px}.clinical-gallery-stage{height:290px}.clinical-gallery-stage:before{inset:13px}.clinical-no-photo-symbol{height:64px;width:64px}.clinical-no-photo-symbol svg{width:37px}.clinical-art-tag{font-size:66px}.clinical-no-photo>strong{font-size:11px}.clinical-placeholder-disclosure{font-size:9px;margin-top:9px}.clinical-gallery-photo{padding:20px}}
+@media(prefers-reduced-motion:reduce){.clinical-gallery *{transition:none!important}}

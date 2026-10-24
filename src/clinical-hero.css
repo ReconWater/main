@@ -1,0 +1,59 @@
+/* Recon Water: single-product clinical storefront. No inherited decorative-hero rules. */
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.minimal-main{background:#f7f9fa}
+.clinical-hero{min-height:calc(100svh - 76px);padding:clamp(30px,4vw,68px) 0 86px;background:linear-gradient(125deg,#fbfcfd 0%,#f4f8f9 75%,#f0f5f6 100%)}
+.clinical-hero-grid{display:grid;grid-template-columns:minmax(0,1.03fr) minmax(0,.97fr);gap:clamp(40px,6.5vw,112px);align-items:start}
+.clinical-hero-media{min-width:0;position:sticky;top:105px}
+.clinical-hero-info{min-width:0;padding:12px 0 0}
+.clinical-kicker{font-size:10px;font-weight:800;letter-spacing:.17em;color:#3c7b8d;text-transform:uppercase}
+.clinical-hero-info h1{font-family:Manrope,Inter,system-ui,sans-serif;font-size:clamp(35px,3.25vw,54px);letter-spacing:-.052em;line-height:1.11;font-weight:800;color:#122f3e;margin:16px 0 12px}
+.clinical-hero-info h1 span{display:block;color:#5b7481;font-size:.7em;font-weight:600;letter-spacing:-.034em;margin-top:6px}
+.clinical-subtitle{color:#55727d;font-size:13px;line-height:1.6;margin:0 0 36px;font-weight:600}
+.clinical-select-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 13px}
+.clinical-select-title h2{margin:0;font-size:15px;line-height:1.4;font-weight:800;letter-spacing:-.015em;color:#24424e}
+.clinical-select-title>span{color:#8596a0;letter-spacing:.12em;font-size:10px;font-weight:800}
+.clinical-packages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;border:0;margin:0;padding:0}
+.clinical-package{min-width:0;min-height:132px;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:1px solid #d9e3e6;border-radius:12px;padding:16px 13px 13px;background:#fff;cursor:pointer;transition:border-color .18s,box-shadow .18s,background .18s}
+.clinical-package:hover{border-color:#97b9c3;background:#fafdfe}
+.clinical-package:focus-within{outline:3px solid #54a3b9;outline-offset:2px}
+.clinical-package.is-selected{border-color:#1d6d83;box-shadow:inset 0 0 0 1px #1d6d83,0 8px 25px #174e6010;background:#f7fcfd}
+.clinical-package input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.clinical-package-check{height:18px;width:18px;border:1px solid #b6c9cf;border-radius:50%;color:transparent;display:grid;place-items:center;margin-bottom:5px}
+.clinical-package.is-selected .clinical-package-check{background:#17677e;color:white;border-color:#17677e}
+.clinical-package>strong{color:#1d3f4b;font-size:12px;line-height:1.25;font-weight:800}
+.clinical-package>small{color:#7a929b;line-height:1.5;font-size:9px;min-height:26px}
+.clinical-package-price{color:#143a4b;font-size:16px;font-weight:800;letter-spacing:-.025em;margin-top:auto}
+.clinical-packages-empty{grid-column:1/-1;background:#fff;border:1px solid #dae5e9;border-radius:10px;padding:26px 18px;color:#55747f;font-size:13px}
+.clinical-purchase{margin-top:22px}
+.clinical-purchase-price{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:20px 0;border-top:1px solid #dbe5e8}
+.clinical-purchase-price>div{display:flex;flex-direction:column;align-items:start;gap:4px;min-width:0}
+.clinical-purchase-price span:not(.clinical-status-dot){font-size:9px;letter-spacing:.13em;color:#7d9199;font-weight:800}
+.clinical-purchase-price strong{font-size:clamp(29px,2.8vw,39px);line-height:1.2;letter-spacing:-.045em;color:#0f3242;font-weight:800}
+.clinical-purchase-price small{font-size:11px;color:#7b919a}
+.clinical-stock-status{border-radius:40px;border:1px solid #d7e3e6;background:#fff;color:#7a868e;display:flex;align-items:center;gap:7px;padding:8px 10px;white-space:nowrap;font-size:10px;font-weight:750;letter-spacing:0}
+.clinical-stock-status.is-available{color:#23725c;background:#e9f6f0;border-color:#d0e8dd}
+.clinical-status-dot{background:currentColor;width:6px;height:6px;border-radius:100%}
+.clinical-purchase-actions{display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px}
+.clinical-quantity{height:52px;display:flex;align-items:center;justify-content:space-between;border:1px solid #d5e2e7;border-radius:9px;background:white;overflow:hidden}
+.clinical-quantity button{background:transparent;border:0;height:100%;width:39px;display:grid;place-items:center;color:#2e6173}
+.clinical-quantity button:hover:not(:disabled){background:#edf5f7}
+.clinical-quantity output{color:#163e4c;font-size:14px;font-weight:800}
+.clinical-add-button{width:100%;height:52px;letter-spacing:0;font-size:13px}
+.clinical-cart-count{display:flex;align-items:center;gap:6px;color:#2c7665;font-size:11px;margin:11px 0 0}
+.clinical-order-note{margin:12px 0 0;color:#7d9099;font-size:10px;line-height:1.6}
+.clinical-quick-info{margin-top:26px;border-top:1px solid #dce6e9}
+.clinical-quick-info>button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;border:0;border-bottom:1px solid #dce6e9;background:transparent;padding:16px 2px;color:#254b59;font-size:12px;font-weight:800;text-align:left}
+.clinical-quick-info>button svg{color:#7396a2;transition:transform .18s}
+.clinical-quick-info>button[aria-expanded="true"] svg{transform:rotate(180deg)}
+.clinical-quick-panel{padding:15px 3px 18px;border-bottom:1px solid #dce6e9;color:#5d7a85;font-size:12px;line-height:1.65;animation:clinical-enter .17s ease}
+.clinical-quick-panel dl{margin:0}
+.clinical-quick-panel dl>div{display:flex;justify-content:space-between;gap:20px;padding:7px 0}
+.clinical-quick-panel dt{color:#8096a0}
+.clinical-quick-panel dd{color:#274959;text-align:right;font-weight:700;margin:0}
+.clinical-quick-panel p{margin:7px 0}
+@keyframes clinical-enter{from{opacity:.25;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media(max-width:1020px){.clinical-hero-grid{gap:32px}.clinical-hero-info h1{font-size:clamp(30px,3.7vw,46px)}.clinical-package{padding:13px 9px;min-height:125px}.clinical-package-price{font-size:14px}}
+@media(max-width:800px){.clinical-hero{padding:24px 0 50px}.clinical-hero-grid{grid-template-columns:1fr;gap:22px}.clinical-hero-media{position:static}.clinical-hero-info{padding:0}.clinical-hero-info h1{font-size:clamp(34px,5vw,48px)}.clinical-subtitle{margin-bottom:24px}.clinical-package{min-height:108px;padding:14px}.clinical-package-price{font-size:17px}}
+@media(max-width:480px){.clinical-hero{padding:17px 0 40px}.clinical-hero-info h1{font-size:34px}.clinical-subtitle{font-size:12px}.clinical-packages{gap:6px}.clinical-package{padding:11px 8px;min-height:117px;gap:5px;border-radius:9px}.clinical-package-check{width:17px;height:17px;margin-bottom:4px}.clinical-package>strong{font-size:11px}.clinical-package>small{font-size:9px;min-height:34px}.clinical-package-price{font-size:13px}.clinical-purchase-price{align-items:start;flex-wrap:wrap}.clinical-purchase-actions{grid-template-columns:101px minmax(0,1fr);gap:8px}.clinical-quantity button{width:31px}.clinical-add-button{padding:12px 8px;font-size:11px}.clinical-add-button svg{width:15px}.clinical-quick-panel dl>div{gap:9px}}
+@media(max-width:360px){.clinical-package{padding:10px 6px}.clinical-package>small{font-size:8px}.clinical-package>strong{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.clinical-package,.clinical-quick-info>button svg{transition:none}.clinical-quick-panel{animation:none}}
