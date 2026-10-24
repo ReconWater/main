@@ -2,9 +2,48 @@ import { createClient } from '@supabase/supabase-js';
 import {packageAvailability} from '../../src/availability.js';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+
+const normalizePromoCode = value => String(value || '').trim().toUpperCase();
+const todayIso = () => new Date().toISOString().slice(0,10);
+const promoDiscount = (promo, subtotal) => {
+  const base=Math.max(0,Number(subtotal||0));
+  if(promo.discount_type==='percentage') return Math.min(base,Math.floor(base*Number(promo.discount_value)/100));
+  return Math.min(base,Number(promo.discount_value||0));
+};
+async function validatePromo(db,rawCode,subtotal){
+  const code=normalizePromoCode(rawCode);
+  if(!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) throw new Error('Promo code is invalid or unavailable');
+  const {data:promo,error}=await db.from('promo_codes').select('*').eq('code',code).eq('active',true).maybeSingle();
+  if(error) throw error;
+  const today=todayIso();
+  if(!promo || (promo.starts_on&&promo.starts_on>today) || (promo.ends_on&&promo.ends_on<today) ||
+     (promo.max_uses!=null&&Number(promo.uses_count||0)>=Number(promo.max_uses)) || Number(subtotal||0)<Number(promo.min_subtotal_cents||0)) {
+    throw new Error('Promo code is invalid or unavailable');
+  }
+  const discount=promoDiscount(promo,subtotal);
+  if(discount<=0) throw new Error('Promo code is invalid or unavailable');
+  return {promo,discount,final:Math.max(0,Number(subtotal)-discount)};
+}
+async function secureDomesticSubtotal(db,items){
+  if(!Array.isArray(items)||items.length<1||items.length>4) throw new Error('Invalid package selection');
+  const ids=[...new Set(items.map(i=>String(i?.package_id||'')).filter(Boolean))];
+  if(ids.length!==items.length) throw new Error('Invalid package selection');
+  const {data:packages,error}=await db.from('product_packages').select('id,price_cents,active,max_per_request').in('id',ids);
+  if(error) throw error;
+  const byId=new Map((packages||[]).map(p=>[p.id,p]));
+  let subtotal=0;
+  for(const item of items){
+    const pack=byId.get(String(item.package_id));
+    const qty=Number(item.quantity);
+    if(!pack||!pack.active||pack.price_cents==null||!Number.isInteger(qty)||qty<1||qty>Number(pack.max_per_request||100)) throw new Error('Invalid package selection');
+    subtotal+=qty*Number(pack.price_cents);
+  }
+  return subtotal;
+}
+
 const safeError = e => {
   const m=String(e?.message||'Request failed');
-  if (/^(Invalid|Insufficient|Too many|Package|Product|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|International|Destination)/i.test(m)) return m;
+  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
 
@@ -25,9 +64,7 @@ export default async request => {
       const stock=(l.data||[]).filter(lot=>lot.product_id===product?.id);
       const counts=packageAvailability((v.data||[]).filter(q=>q.product_id===product?.id),stock);
       const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({...q,available_packages:counts.byId[q.id]??0}));
-      const singlePack=(v.data||[]).find(q=>q.product_id===product?.id&&q.code==='single');
-      const international={active:!!product&&!!singlePack,price_cents:2000,currency:'USD',max_per_request:5,available_packages:Math.min(5,counts.loose)};
-      return reply({product,packages,international,stock:{loose:counts.loose,sealed:counts.sealed}});
+      return reply({product,packages,stock:{loose:counts.loose,sealed:counts.sealed}});
     }
     if(request.method!=='POST') return reply({error:'Method not allowed'},405);
     const auth=request.headers.get('authorization')||'';
@@ -39,39 +76,65 @@ export default async request => {
       body=JSON.parse(raw||'{}'); if(!body||Array.isArray(body)||typeof body!=='object') throw Error(); }
     catch {return reply({error:'Invalid request data'},400);}
     if(action==='submit-order') {
-      const {data,error}=await db.rpc('service_submit_order_v2',{
-        p_customer_id:user.id,p_email:user.email,p_name:body.name,p_shipping:body.shipping,
-        p_items:body.items,p_notes:body.notes||''
-      });
-      if(error) throw error;
-      return reply({order_id:data,message:'Request received. No payment has been collected and inventory is not reserved until approval.'});
-    }
-    if(action==='submit-international-order') {
-      const {data,error}=await db.rpc('service_submit_international_order_v1',{
-        p_customer_id:user.id,p_email:user.email,p_name:body.name,p_shipping:body.shipping,
-        p_quantity:body.quantity,p_notes:body.notes||''
-      });
-      if(error) throw error;
-      return reply({order_id:data,message:'International request received. Product pricing is $20 USD per vial and delivery is a flat $30 CAD. No payment has been collected.'});
+      const secureSubtotal=await secureDomesticSubtotal(db,body.items);
+      const promoResult=body.promo_code?await validatePromo(db,body.promo_code,secureSubtotal):null;
+      if(promoResult){
+        const currentUses=Number(promoResult.promo.uses_count||0);
+        const {data:claimed,error:claimError}=await db.from('promo_codes')
+          .update({uses_count:currentUses+1,updated_at:new Date().toISOString()})
+          .eq('id',promoResult.promo.id).eq('uses_count',currentUses).select('id').maybeSingle();
+        if(claimError) throw claimError;
+        if(!claimed) throw new Error('Promo code is invalid or unavailable');
+      }
+      let orderId=null;
+      try {
+        const {data,error}=await db.rpc('service_submit_order_v2',{
+          p_customer_id:user.id,p_email:user.email,p_name:body.name,p_shipping:body.shipping,
+          p_items:body.items,p_notes:body.notes||''
+        });
+        if(error) throw error;
+        orderId=data;
+        if(promoResult){
+          const {error:updateError}=await db.from('orders').update({
+            promo_code:promoResult.promo.code,
+            promo_discount_cents:promoResult.discount,
+            promo_discount_currency:'CAD'
+          }).eq('id',orderId);
+          if(updateError) throw updateError;
+        }
+      } catch(e) {
+        if(promoResult){
+          const expected=Number(promoResult.promo.uses_count||0)+1;
+          await db.from('promo_codes').update({uses_count:Math.max(0,expected-1),updated_at:new Date().toISOString()})
+            .eq('id',promoResult.promo.id).eq('uses_count',expected);
+        }
+        if(orderId){
+          await db.from('order_items').delete().eq('order_id',orderId);
+          await db.from('orders').delete().eq('id',orderId);
+        }
+        throw e;
+      }
+      return reply({order_id:orderId,promo:promoResult?{code:promoResult.promo.code,discount_cents:promoResult.discount,final_subtotal_cents:promoResult.final}:null,message:'Request received. No payment has been collected and inventory is not reserved until approval.'});
     }
     const {data:admin,error:adminErr}=await db.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();
     if(adminErr) throw adminErr;
     if(!admin) return reply({error:'Administrator access required'},403);
     const rpc=async(name,params)=>{const {data,error}=await db.rpc(name,params);if(error)throw error;return data;};
     if(action==='dashboard') {
-      const [pr,pk,lo,ord,ev,alloc,prices]=await Promise.all([
+      const [pr,pk,lo,ord,ev,alloc,prices,promos]=await Promise.all([
         db.from('products').select('*').eq('sku','BW-30ML'),
         db.from('product_packages').select('*').order('vials_per_pack'),
         db.from('inventory_lots').select('*').order('expiry_date'),
         db.from('orders').select('*,order_items(*)').order('created_at',{ascending:false}).limit(150),
         db.from('inventory_events_v2').select('*').order('created_at',{ascending:false}).limit(150),
         db.from('order_allocations_v2').select('*').order('created_at',{ascending:false}).limit(250),
-        db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50)
+        db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50),
+        db.from('promo_codes').select('*').order('created_at',{ascending:false})
       ]);
-      for(const r of [pr,pk,lo,ord,ev,alloc,prices]) if(r.error)throw r.error;
+      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos]) if(r.error)throw r.error;
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
-        movements:ev.data,allocations:alloc.data,priceEvents:prices.data});
+        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[]});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -100,6 +163,25 @@ export default async request => {
     if(action==='manual-order') {const id=await rpc('service_admin_manual_order_v2',{
       p_name:body.name,p_email:body.email,p_package_id:body.package_id,p_quantity:body.quantity,
       p_notes:body.notes||'',p_actor:user.id});return reply({order_id:id});}
+    if(action==='save-promo') {
+      const id=body.id?String(body.id):null;
+      const code=normalizePromoCode(body.code);
+      const type=String(body.discount_type||'');
+      const value=Number(body.discount_value);
+      const minimum=Number(body.min_subtotal_cents||0);
+      const maxUses=body.max_uses==null||body.max_uses===''?null:Number(body.max_uses);
+      const starts=body.starts_on||null,ends=body.ends_on||null;
+      if(!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) return reply({error:'Promo code must be 3-32 characters using letters, numbers, hyphens or underscores'},400);
+      if(!['percentage','fixed'].includes(type) || !Number.isInteger(value) || value<=0 || (type==='percentage'&&value>100)) return reply({error:'Invalid promo discount'},400);
+      if(!Number.isInteger(minimum)||minimum<0|| (maxUses!=null&&(!Number.isInteger(maxUses)||maxUses<1))) return reply({error:'Invalid promo limits'},400);
+      if((starts&&!/^\d{4}-\d{2}-\d{2}$/.test(starts))||(ends&&!/^\d{4}-\d{2}-\d{2}$/.test(ends))||(starts&&ends&&ends<starts)) return reply({error:'Invalid promo date range'},400);
+      const payload={code,discount_type:type,discount_value:value,currency:'CAD',min_subtotal_cents:minimum,max_uses:maxUses,starts_on:starts,ends_on:ends,active:!!body.active,internal_note:String(body.internal_note||'').slice(0,300),updated_at:new Date().toISOString()};
+      let result;
+      if(id) result=await db.from('promo_codes').update(payload).eq('id',id).select('*').single();
+      else result=await db.from('promo_codes').insert(payload).select('*').single();
+      if(result.error) throw result.error;
+      return reply({promo:result.data});
+    }
     return reply({error:'Unknown action'},404);
   } catch(e) {
     console.error('Recon Water API',action,e?.code||'',e?.message||'');

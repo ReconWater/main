@@ -287,8 +287,7 @@
   .form-field input,.form-field select,.form-field textarea{font-size:16px}
 }
 
-/* International order identification */
-.order-market-badge{display:inline-flex;align-items:center;margin-left:8px;padding:4px 7px;border-radius:999px;background:#e9f4f7;color:#17677e;font-size:8px;line-height:1;font-weight:850;letter-spacing:.09em;vertical-align:middle}
-.admin-shipping-charge{display:block!important;margin-top:5px;color:#617b86!important;letter-spacing:0!important;text-transform:none!important}
-.order-filters>select{min-width:132px}
-@media(max-width:760px){.order-filters>select{min-width:0;width:100%}.order-market-badge{margin-left:5px}}
+/* Promo code administration */
+.admin-promo-editors{display:grid;gap:14px}.promo-editor{border:1px solid #dbe6ea;border-radius:15px;background:#fff;padding:18px}.promo-editor.is-new{background:linear-gradient(145deg,#fbfdfe,#f4f9fa);border-style:dashed}.promo-editor-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.promo-editor-head>div{display:flex;flex-direction:column;gap:3px}.promo-editor-head>div>span{font-size:9px;font-weight:800;letter-spacing:.12em;color:#79909a}.promo-editor-head strong{font:800 17px Manrope;color:#173a49;letter-spacing:-.02em}.promo-state{padding:6px 9px;border-radius:999px;font-size:9px;font-weight:800;background:#eef3f5;color:#70838c}.promo-state.is-active{background:#e9f7f0;color:#19704f}.promo-editor-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.promo-editor-bottom{display:flex;align-items:center;gap:18px;border-top:1px solid #e6eef1;margin-top:16px;padding-top:14px}.promo-editor-bottom label{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;color:#49616c}.promo-editor-bottom>span{font-size:9px;color:#82949c;margin-right:auto}.promo-editor-bottom input[type="checkbox"]{accent-color:#397f92}.admin-promo-order,.admin-order-net{display:block;margin-top:5px;font-size:10px}.admin-promo-order{color:#19704f;font-weight:700}.admin-order-net{color:#294d5d;font-weight:800}
+@media(max-width:1100px){.promo-editor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.promo-editor-grid{grid-template-columns:1fr}.promo-editor-bottom{align-items:flex-start;flex-direction:column}.promo-editor-bottom>span{margin-right:0}.promo-editor-bottom .primary-button{width:100%}}

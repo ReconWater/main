@@ -46,6 +46,9 @@ function Storefront() {
   const [selectedImage, setSelectedImage] = useState(0);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
+  const [promoInput, setPromoInput] = useState('');
+  const [promo, setPromo] = useState(null);
+  const [promoState, setPromoState] = useState({ busy: false, message: '', error: false });
 
   useEffect(() => {
     let alive = true;
@@ -72,7 +75,40 @@ function Storefront() {
 
   const unit = useMemo(() => selectedPack.price / selectedPack.qty, [selectedPack]);
   const selectedInStock = selectedPack.available == null || selectedPack.available > 0;
-  const addToCart = () => { if (!selectedInStock) return; setCart(selectedPack); setCartOpen(true); };
+  const addToCart = () => {
+    if (!selectedInStock) return;
+    setCart(selectedPack);
+    setPromo(null);
+    setPromoInput('');
+    setPromoState({ busy: false, message: '', error: false });
+    setCartOpen(true);
+  };
+  const cartSubtotalCents = cart ? Math.round(Number(cart.price) * 100) : 0;
+  const cartDiscountCents = promo ? Number(promo.discount_cents || 0) : 0;
+  const cartTotalCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
+  async function applyPromo(event) {
+    event.preventDefault();
+    if (!cart || !promoInput.trim()) return;
+    setPromoState({ busy: true, message: '', error: false });
+    try {
+      const result = await apiRequest('promo-validate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: promoInput, package_id: cart.id }),
+      });
+      setPromo(result);
+      setPromoInput(result.code);
+      setPromoState({ busy: false, message: `${result.code} applied`, error: false });
+    } catch (error) {
+      setPromo(null);
+      setPromoState({ busy: false, message: error.message || 'Promo code could not be applied.', error: true });
+    }
+  }
+  function removePromo() {
+    setPromo(null);
+    setPromoInput('');
+    setPromoState({ busy: false, message: '', error: false });
+  }
 
 
   return <div className="app-shell">
@@ -122,7 +158,9 @@ function Storefront() {
   </main>
 
     <div className={`cart-drawer ${cartOpen?'open':''}`} aria-hidden={!cartOpen}><button className="cart-scrim" onClick={()=>setCartOpen(false)} aria-label="Close cart"/><aside className="cart-panel"><div className="cart-head"><div><span>Your cart</span><small>{cart?`${cart.qty} ${cart.qty===1?'vial':'vials'}`:'Empty'}</small></div><button onClick={()=>setCartOpen(false)}>×</button></div>
-      {!cart ? <div className="empty-cart"><Icon name="cart" size={28}/><h3>Your cart is empty</h3><p>Select a quantity and add it to your cart.</p></div> : <><div className="cart-product"><div className="cart-image"><img src={PRODUCT_IMAGES[0].src} alt="Hospira Bacteriostatic Water vial"/></div><div><b>Bacteriostatic Water for Injection USP</b><span>30 mL · {cart.label}</span><strong>${money(cart.price)} CAD</strong></div></div><div className="cart-summary"><div><span>Subtotal</span><b>${money(cart.price)} CAD</b></div><p>Shipping and applicable taxes calculated at checkout.</p></div><button className="checkout-button">Continue to checkout <Icon name="chevron" size={17}/></button><p className="checkout-disclaimer">Checkout order submission is a separate workflow.</p></>}
+      {!cart ? <div className="empty-cart"><Icon name="cart" size={28}/><h3>Your cart is empty</h3><p>Select a quantity and add it to your cart.</p></div> : <><div className="cart-product"><div className="cart-image"><img src={PRODUCT_IMAGES[0].src} alt="Hospira Bacteriostatic Water vial"/></div><div><b>Bacteriostatic Water for Injection USP</b><span>30 mL · {cart.label}</span><strong>${money(cart.price)} CAD</strong></div></div>
+        <form className="promo-entry" onSubmit={applyPromo}><label htmlFor="promo-code">Promo code</label><div><input id="promo-code" value={promoInput} onChange={e=>setPromoInput(e.target.value.toUpperCase())} placeholder="Enter code" maxLength="32" disabled={promoState.busy}/>{promo?<button type="button" className="promo-remove" onClick={removePromo}>Remove</button>:<button type="submit" disabled={promoState.busy||!promoInput.trim()}>{promoState.busy?'Checking…':'Apply'}</button>}</div>{promoState.message&&<p className={`promo-message ${promoState.error?'is-error':'is-valid'}`} role="status">{promoState.message}</p>}</form>
+        <div className="cart-summary"><div><span>Subtotal</span><b>${money(cartSubtotalCents/100)} CAD</b></div>{promo&&<div className="promo-discount-row"><span>Promo · {promo.code}</span><b>−${money(cartDiscountCents/100)} CAD</b></div>}{promo&&<div className="cart-total-row"><span>Product total</span><b>${money(cartTotalCents/100)} CAD</b></div>}<p>Shipping and applicable taxes calculated at checkout.</p></div><button className="checkout-button">Continue to checkout <Icon name="chevron" size={17}/></button><p className="checkout-disclaimer">Promo codes apply to Canadian product subtotal only. Checkout order submission is a separate workflow.</p></>}
     </aside></div>
 
     <div className="mobile-atc"><div><small>{selectedPack.label}</small><b>${money(selectedPack.price)} CAD</b></div><button onClick={addToCart} disabled={!selectedInStock}>{selectedInStock?'Add to cart':'Unavailable'}</button></div>

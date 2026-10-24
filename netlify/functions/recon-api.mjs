@@ -9,6 +9,27 @@ const json = (statusCode, body) => ({
   body: JSON.stringify(body),
 });
 
+
+const normalizePromoCode = value => String(value || '').trim().toUpperCase();
+const promoDiscount = (promo, subtotal) => {
+  const base = Math.max(0, Number(subtotal || 0));
+  if (promo.discount_type === 'percentage') return Math.min(base, Math.floor(base * Number(promo.discount_value) / 100));
+  return Math.min(base, Number(promo.discount_value || 0));
+};
+async function validateDomesticPromo(db, rawCode, subtotalCents) {
+  const code = normalizePromoCode(rawCode);
+  if (!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) return null;
+  const { data: promo, error } = await db.from('promo_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
+  if (error) throw error;
+  const today = new Date().toISOString().slice(0, 10);
+  if (!promo || (promo.starts_on && promo.starts_on > today) || (promo.ends_on && promo.ends_on < today) ||
+      (promo.max_uses != null && Number(promo.uses_count || 0) >= Number(promo.max_uses)) ||
+      Number(subtotalCents || 0) < Number(promo.min_subtotal_cents || 0)) return null;
+  const discount = promoDiscount(promo, subtotalCents);
+  if (discount <= 0) return null;
+  return { promo, discount, final: Math.max(0, Number(subtotalCents) - discount) };
+}
+
 function getAdminClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -104,6 +125,29 @@ export async function handler(event) {
     if (event.httpMethod === 'GET' && mode === 'catalogue') {
       const data = await loadCatalogue(db, false);
       return json(200, data);
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'promo-validate') {
+      let body;
+      try { body = JSON.parse(event.body || '{}'); }
+      catch { return json(400, { error: 'Invalid request data.' }); }
+      const packageId = String(body.package_id || '');
+      const code = normalizePromoCode(body.code);
+      if (!packageId || !code) return json(400, { error: 'Enter a valid promo code.' });
+      const { data: pack, error: packError } = await db.from('product_packages')
+        .select('id,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
+      if (packError) throw packError;
+      if (!pack || pack.price_cents == null) return json(400, { error: 'Promo code could not be applied.' });
+      const result = await validateDomesticPromo(db, code, Number(pack.price_cents));
+      if (!result) return json(400, { error: 'Promo code is invalid or unavailable.' });
+      return json(200, {
+        code: result.promo.code,
+        discount_type: result.promo.discount_type,
+        discount_value: result.promo.discount_value,
+        discount_cents: result.discount,
+        subtotal_cents: Number(pack.price_cents),
+        final_subtotal_cents: result.final,
+      });
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-international') {
