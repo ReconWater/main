@@ -22,6 +22,7 @@ function Icon({ name, size = 20 }) {
     leaf: <><path d="M12 21V8"/><path d="M12 13C8 13 5 10 5 6c4 0 7 3 7 7Z"/><path d="M12 16c4 0 7-3 7-7-4 0-7 3-7 7Z"/></>,
     chevron: <path d="m9 18 6-6-6-6"/>,
     arrowLeft: <><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></>,
+    cart: <><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.4 10.2a2 2 0 0 0 2 1.5h7.9a2 2 0 0 0 1.9-1.4L21 7H6"/></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
@@ -71,8 +72,8 @@ function InternationalOrders() {
 
     <header className="site-header"><div className="container nav-wrap">
       <a className="brand brand-logo-link" href="/" aria-label="Recon Water home"><img className="brand-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a>
-      <nav className="desktop-nav" aria-label="Primary"><a href="/">Canada store</a><a className="active-link" href="/international/" aria-current="page">International</a></nav>
-      <a className="international-back" href="/"><Icon name="arrowLeft" size={17}/><span>Canada store</span></a>
+      <nav className="desktop-nav" aria-label="Primary"><a href="/#product">Product</a><a href="/international/" aria-current="page">International</a></nav>
+      <a className="cart-trigger" href="/" aria-label="Return to Canadian storefront cart"><Icon name="cart"/><span>Cart</span><b>0</b></a>
     </div></header>
 
     <main>
