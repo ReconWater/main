@@ -5,9 +5,5 @@
 [functions]
   node_bundler = "esbuild"
 
-# /admin/ is a real Vite entry point (dist/admin/index.html).
-# Only canonicalize the slash; do not rewrite admin back to the storefront index.
-[[redirects]]
-  from = "/admin"
-  to = "/admin/"
-  status = 301
+# Admin is emitted as dist/admin/index.html by Vite.
+# public/_redirects maps /admin and /admin/* to that entry before the SPA fallback.

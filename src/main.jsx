@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { configured as isSupabaseConfigured, supabase } from './supabase';
+const AdminPanel = React.lazy(() => import('./AdminPanel.jsx'));
 
 const PRODUCT_IMAGES = [
   { src: '/assets/bac-water-front.webp', alt: 'Bacteriostatic Water for Injection USP 30 mL vial front view', label: 'Front' },
@@ -126,91 +127,82 @@ function Storefront() {
   </div>;
 }
 
-function AdminApp() {
+function AdminRoute() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
-  const [dashboard, setDashboard] = useState(null);
-  const [drafts, setDrafts] = useState({});
-  const [saving, setSaving] = useState('');
+  const [message, setMessage] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) { setLoading(false); return; }
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session || null); setLoading(false); });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => data.subscription.unsubscribe();
+    if (!isSupabaseConfigured || !supabase) {
+      setLoading(false);
+      return undefined;
+    }
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session || null);
+      setLoading(false);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession || null);
+      setLoading(false);
+    });
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    if (!session) { setDashboard(null); return; }
-    loadAdmin();
-  }, [session]);
+  const toast = (text, error = false) => {
+    setMessage({ text, error });
+    window.setTimeout(() => setMessage(current => current?.text === text ? null : current), 5000);
+  };
 
-  async function authHeaders() {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  const signIn = async event => {
+    event.preventDefault();
+    if (!supabase) return;
+    setBusy(true);
+    setMessage(null);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) setMessage({ text: error.message, error: true });
+    setBusy(false);
+  };
+
+  const signOut = async () => {
+    await supabase?.auth.signOut();
+    setSession(null);
+    setMessage(null);
+  };
+
+  if (loading) {
+    return <div className="admin-page"><div className="admin-card"><p>Loading administrator workspace…</p></div></div>;
   }
 
-  async function loadAdmin() {
-    setMessage('');
-    try {
-      const data = await apiRequest('admin', { headers: await authHeaders() });
-      setDashboard(data);
-      const nextDrafts = {};
-      for (const pack of data.packages || []) nextDrafts[pack.id] = { price: Number(pack.price_cents || 0) / 100, active: Boolean(pack.active), max: Number(pack.max_per_request || 10) };
-      setDrafts(nextDrafts);
-    } catch (error) {
-      setMessage(error.message);
-      if (/Authentication|expired/i.test(error.message)) await supabase.auth.signOut();
-    }
+  if (!isSupabaseConfigured || !supabase) {
+    return <div className="admin-page"><div className="admin-card admin-setup"><img src="/assets/recon-water-logo.webp" alt="Recon Water"/><h1>Supabase Auth is not configured</h1><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to the Netlify environment and redeploy.</p></div></div>;
   }
 
-  async function signIn(event) {
-    event.preventDefault(); setMessage('');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setMessage(error.message);
+  if (!session) {
+    return <div className="admin-page"><form className="admin-card admin-login" onSubmit={signIn}><img src="/assets/recon-water-logo.webp" alt="Recon Water"/><span className="admin-kicker">RECON WATER ADMIN</span><h1>Administrator sign in</h1><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>{message&&<div className="admin-alert">{message.text}</div>}<button type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form></div>;
   }
 
-  async function savePackage(pack) {
-    const draft = drafts[pack.id];
-    const cents = Math.round(Number(draft.price) * 100);
-    setSaving(pack.id); setMessage('');
-    try {
-      await apiRequest('set-package', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(await authHeaders()) },
-        body: JSON.stringify({ package_id: pack.id, price_cents: cents, active: Boolean(draft.active), max_per_request: Number(draft.max) }),
-      });
-      setMessage(`${pack.label} updated.`);
-      await loadAdmin();
-    } catch (error) { setMessage(error.message); }
-    finally { setSaving(''); }
-  }
-
-  function patchDraft(id, key, value) { setDrafts(all => ({ ...all, [id]: { ...all[id], [key]: value } })); }
-
-  if (loading) return <div className="admin-page"><div className="admin-card"><p>Loading admin…</p></div></div>;
-  if (!isSupabaseConfigured) return <div className="admin-page"><div className="admin-card admin-setup"><img src="/assets/recon-water-logo.webp" alt="Recon Water"/><h1>Supabase Auth is not configured</h1><p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to the site environment and redeploy.</p></div></div>;
-  if (!session) return <div className="admin-page"><form className="admin-card admin-login" onSubmit={signIn}><img src="/assets/recon-water-logo.webp" alt="Recon Water"/><span className="admin-kicker">RECON WATER ADMIN</span><h1>Sign in</h1><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>{message&&<div className="admin-alert">{message}</div>}<button type="submit">Sign in</button></form></div>;
-  if (!dashboard) return <div className="admin-page"><div className="admin-card admin-setup"><h1>Checking admin access</h1><p>{message || 'Connecting to Recon Water…'}</p>{message&&<button onClick={()=>supabase.auth.signOut()}>Sign out</button>}</div></div>;
-
-  return <div className="admin-shell"><header className="admin-header"><img src="/assets/recon-water-logo.webp" alt="Recon Water"/><div><span>{dashboard.admin?.email}</span><button onClick={()=>supabase.auth.signOut()}>Sign out</button></div></header><main className="admin-main">
-    <div className="admin-title"><div><span>SUPABASE CONNECTED</span><h1>Store operations</h1></div><button onClick={loadAdmin}>Refresh</button></div>
-    {message&&<div className="admin-alert admin-alert-wide">{message}</div>}
-    <section className="admin-panel"><div className="admin-panel-head"><div><h2>Packaging & pricing</h2><p>Prices and publication status are server-authoritative and update the storefront.</p></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>SKU</th><th>Package</th><th>Vials</th><th>Available packs</th><th>Price CAD</th><th>Active</th><th>Max/request</th><th></th></tr></thead><tbody>
-      {(dashboard.packages||[]).map(pack=>{const d=drafts[pack.id]||{};return <tr key={pack.id}><td><code>{pack.sku}</code></td><td><b>{pack.label}</b></td><td>{pack.vials_per_pack}</td><td>{pack.available_packs}</td><td><input type="number" min="0.01" step="0.01" value={d.price ?? ''} onChange={e=>patchDraft(pack.id,'price',e.target.value)}/></td><td><input className="admin-check" type="checkbox" checked={Boolean(d.active)} onChange={e=>patchDraft(pack.id,'active',e.target.checked)}/></td><td><input type="number" min="1" max="100" step="1" value={d.max ?? 10} onChange={e=>patchDraft(pack.id,'max',e.target.value)}/></td><td><button onClick={()=>savePackage(pack)} disabled={saving===pack.id}>{saving===pack.id?'Saving…':'Save'}</button></td></tr>})}
-    </tbody></table></div></section>
-
-    <section className="admin-panel"><div className="admin-panel-head"><div><h2>Inventory lots</h2><p>Read-only here; stock mutations remain on the protected server-side inventory workflow.</p></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Lot</th><th>Status</th><th>Expiry</th><th>Loose</th><th>Loose reserved</th><th>Sealed cases</th><th>Sealed reserved</th></tr></thead><tbody>
-      {(dashboard.lots||[]).map(lot=><tr key={lot.id}><td><b>{lot.lot_code}</b></td><td>{lot.status}</td><td>{lot.expiry_date||'—'}</td><td>{lot.loose_on_hand}</td><td>{lot.loose_reserved}</td><td>{lot.sealed_on_hand}</td><td>{lot.sealed_reserved}</td></tr>)}
-    </tbody></table></div></section>
-
-    <section className="admin-panel"><div className="admin-panel-head"><div><h2>Recent orders</h2><p>Latest 50 records from Supabase.</p></div></div>{(dashboard.orders||[]).length===0?<div className="admin-empty">No orders yet.</div>:<div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Subtotal</th><th>Created</th></tr></thead><tbody>{dashboard.orders.map(order=><tr key={order.id}><td><b>{order.order_number}</b></td><td>{order.customer_email||order.customer_name||'—'}</td><td>{order.status}</td><td>${money(Number(order.subtotal_cents||0)/100)} CAD</td><td>{new Date(order.created_at).toLocaleString()}</td></tr>)}</tbody></table></div>}</section>
-  </main></div>;
+  return <>
+    <React.Suspense fallback={<main className="admin-page"><div className="admin-card"><p>Loading operations center…</p></div></main>}>
+      <AdminPanel
+        session={session}
+        openAuth={()=>{}}
+        toast={toast}
+        onSignOut={signOut}
+        reloadPublic={async()=>{}}
+      />
+    </React.Suspense>
+    {message&&<div className={`admin-route-toast ${message.error?'is-error':''}`} role="status"><span>{message.text}</span><button type="button" onClick={()=>setMessage(null)} aria-label="Dismiss">×</button></div>}
+  </>;
 }
 
 const adminRoute = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
-createRoot(document.getElementById('root')).render(adminRoute ? <AdminApp/> : <Storefront/>);
+createRoot(document.getElementById('root')).render(adminRoute ? <AdminRoute/> : <Storefront/>);
