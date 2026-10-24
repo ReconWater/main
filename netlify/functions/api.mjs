@@ -4,7 +4,7 @@ import {packageAvailability} from '../../src/availability.js';
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const safeError = e => {
   const m=String(e?.message||'Request failed');
-  if (/^(Invalid|Insufficient|Too many|Package|Product|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total)/i.test(m)) return m;
+  if (/^(Invalid|Insufficient|Too many|Package|Product|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|International|Destination)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
 
@@ -25,7 +25,9 @@ export default async request => {
       const stock=(l.data||[]).filter(lot=>lot.product_id===product?.id);
       const counts=packageAvailability((v.data||[]).filter(q=>q.product_id===product?.id),stock);
       const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({...q,available_packages:counts.byId[q.id]??0}));
-      return reply({product,packages,stock:{loose:counts.loose,sealed:counts.sealed}});
+      const singlePack=(v.data||[]).find(q=>q.product_id===product?.id&&q.code==='single');
+      const international={active:!!product&&!!singlePack,price_cents:2000,currency:'USD',max_per_request:5,available_packages:Math.min(5,counts.loose)};
+      return reply({product,packages,international,stock:{loose:counts.loose,sealed:counts.sealed}});
     }
     if(request.method!=='POST') return reply({error:'Method not allowed'},405);
     const auth=request.headers.get('authorization')||'';
@@ -43,6 +45,14 @@ export default async request => {
       });
       if(error) throw error;
       return reply({order_id:data,message:'Request received. No payment has been collected and inventory is not reserved until approval.'});
+    }
+    if(action==='submit-international-order') {
+      const {data,error}=await db.rpc('service_submit_international_order_v1',{
+        p_customer_id:user.id,p_email:user.email,p_name:body.name,p_shipping:body.shipping,
+        p_quantity:body.quantity,p_notes:body.notes||''
+      });
+      if(error) throw error;
+      return reply({order_id:data,message:'International request received. Product pricing is $20 USD per vial and delivery is a flat $30 CAD. No payment has been collected.'});
     }
     const {data:admin,error:adminErr}=await db.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();
     if(adminErr) throw adminErr;
