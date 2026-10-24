@@ -5,5 +5,18 @@
 [functions]
   node_bundler = "esbuild"
 
-# Admin is emitted as dist/admin/index.html by Vite.
-# public/_redirects maps /admin and /admin/* to that entry before the SPA fallback.
+# Admin is a dedicated Vite entry. Keep these rules before the storefront fallback.
+[[redirects]]
+  from = "/admin"
+  to = "/admin/"
+  status = 301
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/admin/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
