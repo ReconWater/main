@@ -9,6 +9,7 @@ export default defineConfig({
         admin: resolve(process.cwd(), 'admin.html'),
         international: resolve(process.cwd(), 'international.html'),
         products: resolve(process.cwd(), 'products.html'),
+        product: resolve(process.cwd(), 'product.html'),
       },
     },
   },

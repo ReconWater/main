@@ -32,7 +32,7 @@ export default function SiteHeader({ active = 'home', cartCount = 0, onCartClick
             <span className="rw-nav-chevron"><Chevron/></span>
             <div className="rw-products-menu" role="group" aria-label="Products">
               <div className="rw-products-menu-head"><span>CATALOGUE</span><small>Canadian supply</small></div>
-              <a className="rw-product-menu-item" href="/#product">
+              <a className="rw-product-menu-item" href="/products/bacteriostatic-water/">
                 <span className="rw-product-menu-thumb"><img src="/assets/bac-water-front.webp" alt="" /></span>
                 <span><b>Bacteriostatic Water</b><small>Hospira / Pfizer · 30 mL</small></span>
                 <i>→</i>
@@ -59,7 +59,7 @@ export default function SiteHeader({ active = 'home', cartCount = 0, onCartClick
         <nav aria-label="Mobile navigation">
           <a className={activeClass('home')} href="/" onClick={closeMobile}><span>Home</span><i>01</i></a>
           <a className={activeClass('products')} href="/products/" onClick={closeMobile}><span>Products</span><i>02</i></a>
-          <a className="rw-mobile-sub" href="/#product" onClick={closeMobile}><span>Bacteriostatic Water · 30 mL</span><i>→</i></a>
+          <a className="rw-mobile-sub" href="/products/bacteriostatic-water/" onClick={closeMobile}><span>Bacteriostatic Water · 30 mL</span><i>→</i></a>
           <a className={activeClass('international')} href="/international/" onClick={closeMobile}><span>International</span><i>03</i></a>
           <a className="rw-mobile-cart" href={cartHref} onClick={closeMobile}><span><CartIcon/> Cart</span><b>{cartCount}</b></a>
         </nav>

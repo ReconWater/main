@@ -14,7 +14,7 @@ const PRODUCTS = [
     din: 'DIN 00038202',
     from: '$15.00 CAD',
     image: '/assets/bac-water-front.webp',
-    href: '/#product',
+    href: '/products/bacteriostatic-water/',
     status: 'Available',
   },
 ];

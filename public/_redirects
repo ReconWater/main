@@ -10,6 +10,11 @@
 /products /products.html 200
 /products/ /products.html 200
 
+# Product detail pages live outside the homepage so the catalogue can grow.
+/products/bacteriostatic-water /product.html 200
+/products/bacteriostatic-water/ /product.html 200
+/products/bacteriostatic-water/* /product.html 200
+
 # International ordering is a dedicated page, not a homepage section.
 /international /international.html 200
 /international/ /international.html 200
