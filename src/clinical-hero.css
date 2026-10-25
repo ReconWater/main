@@ -57,3 +57,37 @@
 @media(max-width:480px){.clinical-hero{padding:17px 0 40px}.clinical-hero-info h1{font-size:34px}.clinical-subtitle{font-size:12px}.clinical-packages{gap:6px}.clinical-package{padding:11px 8px;min-height:117px;gap:5px;border-radius:9px}.clinical-package-check{width:17px;height:17px;margin-bottom:4px}.clinical-package>strong{font-size:11px}.clinical-package>small{font-size:9px;min-height:34px}.clinical-package-price{font-size:13px}.clinical-purchase-price{align-items:start;flex-wrap:wrap}.clinical-purchase-actions{grid-template-columns:101px minmax(0,1fr);gap:8px}.clinical-quantity button{width:31px}.clinical-add-button{padding:12px 8px;font-size:11px}.clinical-add-button svg{width:15px}.clinical-quick-panel dl>div{gap:9px}}
 @media(max-width:360px){.clinical-package{padding:10px 6px}.clinical-package>small{font-size:8px}.clinical-package>strong{font-size:10px}}
 @media(prefers-reduced-motion:reduce){.clinical-package,.clinical-quick-info>button svg{transition:none}.clinical-quick-panel{animation:none}}
+
+/* International orders */
+.international-section{padding:88px 0;background:#fff;border-top:1px solid #dce6e9}
+.international-shell{display:grid;grid-template-columns:minmax(0,.9fr) minmax(420px,1.1fr);gap:clamp(44px,7vw,110px);align-items:center}
+.international-copy h2{margin:15px 0 16px;color:#123443;font:800 clamp(32px,3.2vw,48px)/1.08 Manrope,Inter,system-ui,sans-serif;letter-spacing:-.05em;max-width:650px}
+.international-copy h2 span{display:block;color:#617985;font-weight:650;font-size:.72em;letter-spacing:-.035em;margin-top:7px}
+.international-copy>p{max-width:610px;margin:0;color:#617c87;font-size:13px;line-height:1.75}
+.international-rules{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:30px}
+.international-rules>div{border:1px solid #dbe6e9;border-radius:13px;background:#f8fbfc;padding:16px 15px;display:flex;flex-direction:column;gap:5px}
+.international-rules strong{font:800 19px/1.2 Manrope,Inter,sans-serif;color:#153d4d;letter-spacing:-.025em}
+.international-rules small{color:#78909a;font-size:9px;line-height:1.45}
+.international-card{border:1px solid #d5e2e6;border-radius:20px;background:linear-gradient(145deg,#fff,#f7fbfc);box-shadow:0 22px 60px rgba(17,55,70,.09);padding:28px}
+.international-card-head{display:flex;gap:14px;align-items:flex-start;padding-bottom:22px;border-bottom:1px solid #dce6e9}
+.international-icon{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:#e8f3f6;color:#17677e;flex:0 0 auto}
+.international-card-head>div:last-child{display:flex;flex-direction:column;gap:4px}
+.international-card-head span{font-size:9px;font-weight:800;letter-spacing:.14em;color:#4b8190}
+.international-card-head strong{font-size:15px;color:#193e4c;line-height:1.35}
+.international-card-head small{font-size:10px;color:#7b929b}
+.international-price-row{display:grid;grid-template-columns:1fr auto;gap:26px;align-items:end;padding:23px 0}
+.international-price-row>div:first-child{display:flex;flex-direction:column;gap:4px}
+.international-price-row>div:first-child>span{font-size:9px;letter-spacing:.12em;font-weight:800;color:#80939b}
+.international-price-row>div:first-child>strong{font:800 34px/1.1 Manrope,Inter,sans-serif;color:#113747;letter-spacing:-.045em}
+.international-price-row>div:first-child>small{color:#7e929a;font-size:10px}
+.international-shipping{display:grid;grid-template-columns:auto auto;column-gap:7px;row-gap:2px;align-items:center;padding:12px 14px;border:1px solid #d7e5e8;border-radius:12px;background:#fff;color:#315f6d}
+.international-shipping svg{grid-row:1/3}
+.international-shipping span{font-size:9px;color:#81949b}
+.international-shipping strong{font-size:13px;color:#183f4e}
+.international-actions{display:grid;grid-template-columns:130px minmax(0,1fr);gap:12px}
+.international-actions>.primary-button{min-height:52px;font-size:12px}
+.international-note{margin:13px 0 0;font-size:10px;line-height:1.65;color:#7c9098}
+.international-checkout .international-currency-note{grid-column:1/-1;margin-top:7px;padding:11px 13px;border-radius:10px;background:#f4f8fa;color:#657f8a;font-size:10px;line-height:1.55}
+.history-row>div:last-child small{display:block;margin-top:4px;color:#7b9098;font-size:9px}
+@media(max-width:900px){.international-shell{grid-template-columns:1fr}.international-card{max-width:720px}.international-rules{max-width:720px}}
+@media(max-width:620px){.international-section{padding:58px 0}.international-card{padding:20px;border-radius:16px}.international-rules{grid-template-columns:1fr}.international-price-row{grid-template-columns:1fr;align-items:start}.international-shipping{width:max-content}.international-actions{grid-template-columns:105px minmax(0,1fr);gap:8px}.international-actions>.primary-button{font-size:11px;padding:0 10px}.international-copy h2{font-size:34px}}

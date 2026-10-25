@@ -1,0 +1,14 @@
+.inventory-quantity{border:1px solid #cbdfe5;border-radius:14px;padding:18px;background:#f5fafb;display:grid;gap:16px;min-width:0}
+.inventory-quantity-title{display:grid;gap:5px;color:#123d4d}
+.inventory-quantity-title span{font-size:12px;color:#52717d}
+.inventory-quantity .field-pair{margin:0;gap:14px}
+.inventory-quantity-summary{display:grid;gap:8px;background:#e3f0f3;border-radius:9px;padding:13px;color:#123d4d;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.inventory-quantity-summary [role=alert]{color:#9a430d}
+.inventory-calculator{border-top:1px solid #cbdfe5;padding-top:13px}
+.inventory-calculator summary{cursor:pointer;color:#16495b;font-weight:700;font-size:13px}
+.inventory-calculator[open] summary{margin-bottom:16px}
+.inventory-calculator .form-field{margin-bottom:14px}
+.inventory-calculate-button{border:1px solid #83aebc;border-radius:8px;padding:11px 14px;background:#fff;color:#16495b;font-weight:700;cursor:pointer;width:100%}
+.inventory-calculate-button:hover{background:#e3f0f3}
+.inventory-calculate-button:focus-visible{outline:2px solid #16495b;outline-offset:3px}
+@media(max-width:600px){.inventory-quantity{padding:14px}.inventory-quantity .field-pair{grid-template-columns:1fr}}
