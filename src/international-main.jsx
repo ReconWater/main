@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './international-page.css';
 import './international-payments.css';
+import SiteHeader from './SiteHeader';
 
 const API = '/.netlify/functions/recon-api';
 const money = value => Number(value || 0).toFixed(2);
@@ -72,11 +73,7 @@ function InternationalOrders() {
       <span><Icon name="truck" size={15}/> $30 USD flat delivery</span>
     </div></div>
 
-    <header className="site-header"><div className="container nav-wrap">
-      <a className="brand brand-logo-link" href="/" aria-label="Recon Water home"><img className="brand-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a>
-      <nav className="desktop-nav" aria-label="Primary"><a href="/#product">Product</a><a href="/international/" aria-current="page">International</a></nav>
-      <a className="cart-trigger" href="/" aria-label="Return to Canadian storefront cart"><Icon name="cart"/><span>Cart</span><b>0</b></a>
-    </div></header>
+    <SiteHeader active="international" cartCount={0} cartHref="/" />
 
     <main>
       <section className="international-section international-standalone"><div className="container international-grid">

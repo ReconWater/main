@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './storefront-payments.css';
+import SiteHeader from './SiteHeader';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
 
@@ -156,11 +157,7 @@ function Storefront() {
       <span><Icon name="truck" size={15}/> Canada-wide fulfilment</span>
     </div></div>
 
-    <header className="site-header"><div className="container nav-wrap">
-      <a className="brand brand-logo-link" href="#top" aria-label="Recon Water home"><img className="brand-logo" src="/assets/recon-water-logo.webp" alt="Recon Water" /></a>
-      <nav className="desktop-nav" aria-label="Primary"><a href="#product">Product</a><a href="/international/">International</a></nav>
-      <button className="cart-trigger" onClick={() => setCartOpen(true)} aria-label="Open cart"><Icon name="cart"/><span>Cart</span><b>{cart?.qty || 0}</b></button>
-    </div></header>
+    <SiteHeader active="home" cartCount={cart?.qty || 0} onCartClick={() => setCartOpen(true)} />
 
     <main id="top"><section className="product-hero" id="product"><div className="container hero-grid">
       <div className="gallery-column">

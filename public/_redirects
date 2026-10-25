@@ -6,6 +6,10 @@
 /admin/ /admin.html 200
 /admin/* /admin.html 200
 
+# Product catalogue is a dedicated page and can grow independently of the homepage.
+/products /products.html 200
+/products/ /products.html 200
+
 # International ordering is a dedicated page, not a homepage section.
 /international /international.html 200
 /international/ /international.html 200
