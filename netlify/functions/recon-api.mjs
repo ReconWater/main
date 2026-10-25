@@ -118,21 +118,60 @@ function batchSummary(lots = []) {
 }
 
 async function findReconProduct(db) {
-  const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim();
-  if (configuredSlug) {
-    const { data, error } = await db.from('products').select('id,slug,name,image_path,active,published_domestic,published_international').eq('slug', configuredSlug).eq('active', true).maybeSingle();
+  // Prefer the batch inventory configuration because it already points at the
+  // exact parent product and does not depend on optional catalogue columns.
+  // This also keeps Lot Inventory tied to the same product it is managing.
+  const configuredId = String(process.env.RECON_PRODUCT_ID || '').trim();
+  if (configuredId) {
+    const { data, error } = await db.from('products').select('*').eq('id', configuredId).maybeSingle();
     if (error) throw error;
     if (data) return data;
   }
-  const { data, error } = await db.from('products')
-    .select('id,slug,name,image_path,active,published_domestic,published_international')
-    .eq('active', true)
-    .ilike('name', '%Bacteriostatic%Water%')
-    .order('sort_order', { ascending: true })
-    .limit(1);
+
+  const { data: inventoryConfigs, error: configError } = await db
+    .from('recon_inventory_config')
+    .select('product_id')
+    .limit(10);
+  if (!configError && inventoryConfigs?.length) {
+    // A Recon Water deployment should normally have one configured product.
+    // Prefer an enabled row when multiple historical rows exist.
+    let productId = inventoryConfigs[0]?.product_id;
+    if (inventoryConfigs.length > 1) {
+      const { data: detailedConfigs } = await db
+        .from('recon_inventory_config')
+        .select('product_id,enabled,updated_at')
+        .order('enabled', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      productId = detailedConfigs?.[0]?.product_id || productId;
+    }
+    if (productId) {
+      const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
+      if (error) throw error;
+      if (data) return data;
+    }
+  } else if (configError && !isMissingRelation(configError)) {
+    throw configError;
+  }
+
+  // Schema-tolerant fallback for a fresh install before the batch config row is
+  // created. Read existing columns only; never require products.slug.
+  const { data: products, error } = await db.from('products').select('*').limit(500);
   if (error) throw error;
-  if (!data?.length) throw new Error('Recon Water bacteriostatic-water product was not found. Set RECON_PRODUCT_SLUG in Netlify if the product uses a different name.');
-  return data[0];
+  const rows = (products || []).filter(row => row && row.id);
+  const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim().toLowerCase();
+  const bySlug = configuredSlug
+    ? rows.find(row => String(row.slug || '').trim().toLowerCase() === configuredSlug)
+    : null;
+  if (bySlug) return bySlug;
+
+  const byName = rows.find(row => {
+    const name = String(row.name || '').toLowerCase();
+    return name.includes('bacteriostatic') && name.includes('water');
+  });
+  if (byName) return byName;
+
+  throw new Error('Recon Water product was not found. Set RECON_PRODUCT_ID in Netlify to the product UUID used by Lot Inventory.');
 }
 
 function packageCode(qty) {
