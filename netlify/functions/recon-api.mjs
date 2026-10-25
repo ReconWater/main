@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { chitChatsConfigured, getChitChatsRates } from './_chitchats.mjs';
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -112,6 +113,43 @@ function packageAvailability(pack, lots) {
   return eligible.reduce((sum, lot) => sum + Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)), 0);
 }
 
+
+async function loadShippingProfile(db, packageId) {
+  const { data, error } = await db.from('shipping_profiles').select('*').eq('package_id', packageId).eq('active', true).maybeSingle();
+  if (error) {
+    if (error.code === '42P01' || error.code === '42703') return null;
+    throw error;
+  }
+  return data || null;
+}
+
+async function shippingQuote(db, { market, packageId, recipient, valueCents, sku }) {
+  const domesticFallback = { live: false, amount_cents: 0, currency: 'CAD', service_code: null, service_name: 'Delivery confirmed after review', estimate: '', cad_amount_cents: null };
+  const internationalFallback = { live: false, amount_cents: 3000, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery', estimate: '', cad_amount_cents: null };
+  // Chit Chats currently prohibits medicine/DIN goods from cross-border and international shipment.
+  // Recon Water therefore uses Chit Chats live rating only for Canadian orders.
+  if (market !== 'domestic') return { configured: false, profile_ready: false, rates: [], fallback: internationalFallback };
+  if (!chitChatsConfigured()) return { configured: false, profile_ready: false, rates: [], fallback: domesticFallback };
+  const profile = await loadShippingProfile(db, packageId);
+  if (!profile) return { configured: true, profile_ready: false, rates: [], fallback: domesticFallback };
+  try {
+    const rates = await getChitChatsRates({ profile, recipient, valueCents, sku });
+    return { configured: true, profile_ready: true, rates, fallback: domesticFallback };
+  } catch (error) {
+    return { configured: true, profile_ready: true, rates: [], fallback: domesticFallback, live_error: String(error?.message || 'Live Chit Chats rates are temporarily unavailable') };
+  }
+}
+
+function selectedShippingRate(quote, serviceCode, expectedCents) {
+  if (!quote?.rates?.length) return quote?.fallback || null;
+  const selected = quote.rates.find(rate => rate.service_code === String(serviceCode || ''));
+  if (!selected) throw new Error('Select an available shipping service');
+  if (Number.isInteger(Number(expectedCents)) && Number(expectedCents) !== Number(selected.amount_cents)) {
+    throw new Error('Shipping rate changed. Review the updated delivery price before submitting');
+  }
+  return { ...selected, live: true };
+}
+
 async function loadCatalogue(db, includeInactive = false) {
   const { data: product, error: productError } = await db
     .from('products')
@@ -160,6 +198,29 @@ export async function handler(event) {
     if (event.httpMethod === 'GET' && mode === 'catalogue') {
       const data = await loadCatalogue(db, false);
       return json(200, data);
+    }
+
+
+    if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
+      let body;
+      try { body = JSON.parse(event.body || '{}'); }
+      catch { return json(400, { error: 'Invalid request data.' }); }
+      const market = body.market === 'international' ? 'international' : 'domestic';
+      const recipient = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, name: body.name, email: body.email } : null;
+      if (!recipient || String(recipient.name || '').trim().length < 2 || String(recipient.address || '').trim().length < 5 || String(recipient.city || '').trim().length < 2 || String(recipient.postal || '').trim().length < 2) {
+        return json(400, { error: 'Complete the delivery address to calculate shipping.' });
+      }
+      if (market === 'domestic') {
+        const packageId = String(body.package_id || '');
+        const { data: pack, error } = await db.from('product_packages').select('id,sku,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
+        if (error) throw error;
+        if (!pack || pack.price_cents == null) return json(409, { error: 'Selected package is unavailable.' });
+        const quote = await shippingQuote(db, { market, packageId, recipient: { ...recipient, country: 'Canada' }, valueCents: Number(pack.price_cents), sku: pack.sku });
+        return json(200, quote);
+      }
+      const quantity = Number(body.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) return json(400, { error: 'International orders are limited to 1–5 vials.' });
+      return json(200, { configured: false, profile_ready: false, rates: [], fallback: { live: false, amount_cents: 3000, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery', estimate: '', cad_amount_cents: null } });
     }
 
     if (event.httpMethod === 'POST' && mode === 'promo-validate') {
@@ -225,6 +286,8 @@ export async function handler(event) {
       const referralCode = normalizeReferralCode(body.referral_code);
       const referralRewardCode = normalizeReferralCode(body.referral_reward_code);
       const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
+      const shippingServiceCode = String(body.shipping_service_code || '');
+      const expectedShippingCents = body.expected_shipping_cents == null ? null : Number(body.expected_shipping_cents);
       if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 1000 || !packageId) {
         return json(400, { error: 'Invalid customer details.' });
       }
@@ -262,6 +325,12 @@ export async function handler(event) {
       const afterPromoCents = promoResult ? promoResult.final : subtotalCents;
       const referralReward = referralRewardCode ? await validateReferralReward(db, referralRewardCode, email, afterPromoCents) : null;
       if (referralRewardCode && !referralReward) return json(409, { error: 'Referral reward is invalid, already used, or does not belong to this email. Review your total before submitting.' });
+      const shippingQuoteResult = await shippingQuote(db, {
+        market: 'domestic', packageId: pack.id,
+        recipient: { name, email, address, city, region, postal, country: 'Canada' },
+        valueCents: subtotalCents, sku: pack.sku,
+      });
+      const chosenShipping = selectedShippingRate(shippingQuoteResult, shippingServiceCode, expectedShippingCents);
       let promoClaimed = false;
       let rewardClaimed = false;
       if (promoResult) {
@@ -283,8 +352,14 @@ export async function handler(event) {
           subtotal_cents: subtotalCents,
           market: 'domestic',
           subtotal_currency: 'CAD',
-          shipping_cents: 0,
+          shipping_cents: Number(chosenShipping?.amount_cents || 0),
           shipping_currency: 'CAD',
+          shipping_provider: chosenShipping?.live ? 'chitchats' : 'manual',
+          shipping_service_code: chosenShipping?.service_code || null,
+          shipping_service_name: chosenShipping?.service_name || null,
+          shipping_quote_cad_cents: chosenShipping?.cad_amount_cents ?? (chosenShipping?.live ? Number(chosenShipping?.amount_cents || 0) : null),
+          shipping_estimate: chosenShipping?.estimate || null,
+          shipping_quote_at: chosenShipping?.live ? new Date().toISOString() : null,
           payment_method: 'etransfer',
           payment_status: 'not_requested',
         };
@@ -333,6 +408,7 @@ export async function handler(event) {
         order_number: order.order_number || null,
         promo: promoResult ? { code: promoResult.promo.code, discount_cents: promoResult.discount, final_subtotal_cents: promoResult.final } : null,
         referral_reward: referralReward ? { code: referralReward.reward.reward_code, discount_cents: referralReward.discount, final_subtotal_cents: referralReward.final } : null,
+        shipping: chosenShipping,
       });
     }
 
@@ -410,9 +486,9 @@ export async function handler(event) {
       const freeLoose = (lots || []).reduce((sum, lot) => sum + Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)), 0);
       if (freeLoose < quantity) return json(409, { error: 'Insufficient inventory for selected quantity.' });
 
-      // Fixed international commercial rules are defined only here on the server.
+      // International product pricing stays fixed. Chit Chats is not used for this product cross-border.
       const unitPriceCents = 2000; // USD $20.00 per vial
-      const shippingCents = 3000; // USD $30.00 flat delivery
+      const shippingCents = 3000; // Existing international fallback rate.
 
       const { data: order, error: orderError } = await db
         .from('orders')
@@ -427,6 +503,12 @@ export async function handler(event) {
           subtotal_currency: 'USD',
           shipping_cents: shippingCents,
           shipping_currency: 'USD',
+          shipping_provider: 'flat_rate',
+          shipping_service_code: 'flat_rate_fallback',
+          shipping_service_name: 'Flat delivery',
+          shipping_quote_cad_cents: null,
+          shipping_estimate: null,
+          shipping_quote_at: null,
           payment_method: 'usdc_eth',
           payment_status: 'not_requested',
           referral_id: referral?.id || null,
@@ -453,7 +535,7 @@ export async function handler(event) {
         throw itemError;
       }
 
-      return json(200, { order_id: order.id, order_number: order.order_number || null });
+      return json(200, { order_id: order.id, order_number: order.order_number || null, shipping: { live: false, amount_cents: shippingCents, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery' } });
     }
 
     if (event.httpMethod === 'GET' && mode === 'admin') {

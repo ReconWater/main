@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'node:crypto';
 import {packageAvailability} from '../../src/availability.js';
+import {chitChatsConfigured,chitChatsEnvironment} from './_chitchats.mjs';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 
@@ -210,7 +211,7 @@ export default async request => {
         }
       };
 
-      const [promos,paymentSettings,referrals,rewards]=await Promise.all([
+      const [promos,paymentSettings,referrals,rewards,shippingProfiles]=await Promise.all([
         optionalModule('promos','Promo codes','supabase/006_promo_codes.sql',
           db.from('promo_codes').select('id,code,discount_type,discount_value,min_subtotal_cents,max_uses,uses_count,starts_on,ends_on,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
         optionalModule('payments','Payment methods','supabase/008_manual_payments.sql',
@@ -218,14 +219,16 @@ export default async request => {
         optionalModule('referrals','Referral accounts','supabase/009_referral_system.sql',
           db.from('referral_codes').select('id,code,referrer_name,referrer_email,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
         optionalModule('referrals','Referral rewards','supabase/009_referral_system.sql',
-          db.from('referral_rewards').select('id,referral_id,source_order_id,reward_code,redeemed_order_id,redeemed_at,created_at').order('created_at',{ascending:false}),[])
+          db.from('referral_rewards').select('id,referral_id,source_order_id,reward_code,redeemed_order_id,redeemed_at,created_at').order('created_at',{ascending:false}),[]),
+        optionalModule('shipping','Chit Chats shipping','supabase/010_chitchats_shipping.sql',
+          db.from('shipping_profiles').select('*').order('market').order('vial_quantity',{ascending:true,nullsFirst:false}),[])
       ]);
       // One concise warning per module.
       const warnings=[...new Map(moduleWarnings.map(w=>[w.id,w])).values()];
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
-        referrals,referralRewards:rewards,moduleWarnings:warnings});
+        referrals,referralRewards:rewards,shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},moduleWarnings:warnings});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -306,6 +309,27 @@ export default async request => {
       if(result.error) throw result.error;
       return reply({referral:result.data});
     }
+
+    if(action==='save-shipping-profile'){
+      const id=body.id?String(body.id):null;
+      const packageId=String(body.package_id||'');
+      const active=!!body.active;
+      const weight=body.weight_g===''||body.weight_g==null?null:Number(body.weight_g);
+      const length=body.length_cm===''||body.length_cm==null?null:Number(body.length_cm);
+      const width=body.width_cm===''||body.width_cm==null?null:Number(body.width_cm);
+      const height=body.height_cm===''||body.height_cm==null?null:Number(body.height_cm);
+      const dims=[weight,length,width,height];
+      if(!packageId) return reply({error:'Select a Canadian package'},400);
+      if(dims.some(v=>v!=null&&(!(v>0)||v>100000))) return reply({error:'Packed weight and dimensions must be positive numbers'},400);
+      if(active&&dims.some(v=>!(v>0))) return reply({error:'Enter packed weight and all dimensions before enabling live rates'},400);
+      const payload={package_id:packageId,label:String(body.label||'').trim().slice(0,120),package_type:'parcel',weight_g:weight,length_cm:length,width_cm:width,height_cm:height,active,updated_at:new Date().toISOString()};
+      let result;
+      if(id) result=await db.from('shipping_profiles').update(payload).eq('id',id).select('*').single();
+      else result=await db.from('shipping_profiles').insert(payload).select('*').single();
+      if(result.error) throw result.error;
+      return reply({profile:result.data});
+    }
+
     if(action==='save-payment-settings'){
       const etransferEnabled=!!body.etransfer_enabled;
       const etransferEmail=String(body.etransfer_email||'').trim();
@@ -333,13 +357,13 @@ export default async request => {
       if(method==='etransfer' && (!settings.etransfer_enabled||!settings.etransfer_email)) return reply({error:'Interac e-Transfer is not enabled in Payment methods'},409);
       if(method==='usdc_eth' && (!settings.usdc_eth_enabled||!isEthAddress(settings.usdc_eth_address))) return reply({error:'USDC on Ethereum is not enabled in Payment methods'},409);
       const netProduct=Math.max(0,Number(order.subtotal_cents||0)-Number(order.promo_discount_cents||0)-Number(order.referral_reward_discount_cents||0));
-      const fixedIntl=netProduct+Number(order.shipping_cents||0);
+      const minimumTotal=netProduct+Number(order.shipping_cents||0);
       const requested=Number(body.amount_cents);
       let amount;
-      if(order.market==='international') amount=fixedIntl;
+      if(order.market==='international') amount=minimumTotal;
       else {
-        amount=Number.isInteger(requested)?requested:netProduct;
-        if(amount<netProduct||amount>100000000) return reply({error:'Payment amount cannot be below the approved product total'},400);
+        amount=Number.isInteger(requested)?requested:minimumTotal;
+        if(amount<minimumTotal||amount>100000000) return reply({error:'Payment amount cannot be below the approved order total including delivery'},400);
       }
       const reference=String(order.order_number||order.id).slice(0,80);
       const {data:updated,error:updateError}=await db.from('orders').update({payment_method:method,payment_status:'awaiting_payment',payment_amount_cents:amount,payment_currency:currency,payment_reference:reference,payment_requested_at:new Date().toISOString(),payment_tx_hash:null,paid_at:null}).eq('id',order.id).select('*').single();
