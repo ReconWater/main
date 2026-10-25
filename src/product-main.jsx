@@ -47,7 +47,7 @@ function Storefront() {
   const [packs, setPacks] = useState(FALLBACK_PACKS);
   const [selectedPack, setSelectedPack] = useState(FALLBACK_PACKS[0]);
   const [selectedImage, setSelectedImage] = useState(0);
-  const [inventoryLots, setInventoryLots] = useState([]);
+  const [inventoryState, setInventoryState] = useState('loading');
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
   const [promoInput, setPromoInput] = useState('');
@@ -69,49 +69,44 @@ function Storefront() {
   const [shippingState, setShippingState] = useState({ busy: false, message: '' });
 
   useEffect(() => {
-    let alive = true;
-    apiRequest('catalogue').then(data => {
-      if (!alive || !data?.packages?.length) return;
-      const next = data.packages.map(pack => ({
-        id: pack.id,
-        code: pack.code,
-        sku: pack.sku,
-        label: pack.label,
-        qty: Number(pack.vials_per_pack),
-        price: Number(pack.price_cents) / 100,
-        note: `$${(Number(pack.price_cents) / 100 / Number(pack.vials_per_pack)).toFixed(2)} / vial`,
-        badge: pack.code === 'ten' ? 'Popular' : pack.code === 'case' ? 'Best value' : undefined,
-        available: Number(pack.available_packs ?? 0),
-      }));
-      setPacks(next);
-      setInventoryLots(Array.isArray(data.lots) ? data.lots : []);
-      setSelectedPack(current => next.find(pack => pack.code === current.code) || next[0]);
-    }).catch(() => {
-      // Keep the current display usable if the backend is temporarily unavailable.
-    });
-    return () => { alive = false; };
+    let alive = true, generation = 0;
+    const load = async () => {
+      const request = ++generation;
+      try {
+        const response = await fetch('/.netlify/functions/api?action=catalogue', {cache:'no-store'});
+        if (!response.ok) throw new Error('Inventory unavailable');
+        const data = await response.json();
+        if (!alive || request !== generation) return;
+        const next = (data.packages || []).map(pack => ({
+          id:pack.id, code:pack.code, sku:pack.sku, label:pack.label,
+          qty:Number(pack.vials_per_pack), price:Number(pack.price_cents)/100,
+          note:`$${(Number(pack.price_cents)/100/Number(pack.vials_per_pack)).toFixed(2)} / vial`,
+          badge:pack.code==='ten'?'Popular':pack.code==='case'?'Best value':undefined,
+          available:Number(pack.available_packages || 0), expiry:pack.earliest_expiry || null,
+        }));
+        setPacks(next.length ? next : FALLBACK_PACKS);
+        setSelectedPack(current => next.find(pack=>pack.id===current.id || pack.code===current.code) || next[0] || {...FALLBACK_PACKS[0],available:0});
+        setInventoryState('ready');
+      } catch {
+        if (alive && request===generation) setInventoryState('error');
+      }
+    };
+    const visible = () => {if(document.visibilityState==='visible') load();};
+    load();
+    const timer=setInterval(visible,60000);
+    window.addEventListener('focus',visible);
+    document.addEventListener('visibilitychange',visible);
+    return () => {alive=false;clearInterval(timer);window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);};
   }, []);
 
   const unit = useMemo(() => selectedPack.price / selectedPack.qty, [selectedPack]);
-  const selectedInStock = selectedPack.available == null || selectedPack.available > 0;
-  const selectedExpiry = useMemo(() => {
-    const now = new Date();
-    const eligible = inventoryLots.filter(lot => {
-      if (lot.status !== 'available' || !lot.expiry_date) return false;
-      const expiry = new Date(`${lot.expiry_date}T23:59:59Z`);
-      if (!(expiry > now)) return false;
-      if (selectedPack.code === 'case') {
-        return Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)) >= 1;
-      }
-      const freeLoose = Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0));
-      return freeLoose >= Number(selectedPack.qty || 1);
-    });
-    eligible.sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
-    return eligible[0]?.expiry_date || '';
-  }, [inventoryLots, selectedPack]);
-  const selectedExpiryLabel = selectedExpiry
-    ? new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${selectedExpiry}T12:00:00Z`))
-    : 'Not currently available';
+  const selectedInStock = inventoryState==='ready' && selectedPack.available > 0;
+  const selectedExpiry = selectedInStock ? selectedPack.expiry : null;
+  const selectedExpiryLabel = inventoryState==='loading' ? 'Checking inventory…'
+    : inventoryState==='error' ? 'Inventory temporarily unavailable'
+    : selectedExpiry
+      ? new Intl.DateTimeFormat('en-CA', {year:'numeric',month:'long',day:'numeric',timeZone:'UTC'}).format(new Date(`${selectedExpiry}T12:00:00Z`))
+      : 'No available batch';
   const addToCart = () => {
     if (!selectedInStock) return;
     setCart(selectedPack);
@@ -284,7 +279,7 @@ function Storefront() {
             <small>Based on available {selectedPack.label.toLowerCase()} inventory.</small>
           </div>
         </div>
-        <div className="hero-price-row"><div><span>From</span><strong>${Math.min(...packs.map(p=>p.price)).toFixed(2)} <small>CAD</small></strong></div><div className={`stock ${selectedInStock?'':'out'}`}><i/>{selectedInStock?'In stock':'Unavailable'}</div></div>
+        <div className="hero-price-row"><div><span>From</span><strong>${Math.min(...packs.map(p=>p.price)).toFixed(2)} <small>CAD</small></strong></div><div className={`stock ${selectedInStock?'':'out'}`}><i/>{inventoryState==='loading'?'Checking stock':inventoryState==='error'?'Stock unavailable':selectedInStock?'In stock':'Unavailable'}</div></div>
         <div className="divider"/>
         <div className="pack-label"><span>Choose quantity</span><b>{selectedPack.label}</b></div>
         <div className="pack-grid">{packs.map(pack=><button key={pack.id} onClick={()=>setSelectedPack(pack)} className={`pack-card ${selectedPack.id===pack.id?'selected':''} ${pack.available===0?'sold-out':''}`}>

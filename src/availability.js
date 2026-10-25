@@ -26,3 +26,12 @@ export function packageAvailability(packages = [], lots = [], today) {
   }
   return {loose, sealed, byId};
 }
+
+/** Earliest eligible lot that can supply a whole selected package. */
+export function packageExpiry(pack, lots = [], today) {
+  const {eligible, free} = availableStock(lots, today);
+  const sealed = pack.stock_kind === 'sealed';
+  const needed = sealed ? 1 : Math.max(1, Number(pack.vials_per_pack) || 1);
+  return eligible.filter(lot => free(lot, sealed ? 'sealed' : 'loose') >= needed)
+    .map(lot => lot.expiry_date).sort()[0] || null;
+}

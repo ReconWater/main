@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes } from 'node:crypto';
-import {packageAvailability} from '../../src/availability.js';
+import {packageAvailability,packageExpiry} from '../../src/availability.js';
 import {chitChatsConfigured,chitChatsEnvironment} from './_chitchats.mjs';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -112,7 +112,7 @@ export default async request => {
       const product=p.data?.[0]||null;
       const stock=(l.data||[]).filter(lot=>lot.product_id===product?.id);
       const counts=packageAvailability((v.data||[]).filter(q=>q.product_id===product?.id),stock);
-      const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({...q,available_packages:counts.byId[q.id]??0}));
+      const packages=(v.data||[]).filter(q=>q.product_id===product?.id&&q.active&&Number(q.price_cents)>0).map(q=>({...q,available_packages:counts.byId[q.id]??0,earliest_expiry:packageExpiry(q,stock)}));
       return reply({product,packages,stock:{loose:counts.loose,sealed:counts.sealed}});
     }
     if(request.method!=='POST') return reply({error:'Method not allowed'},405);
