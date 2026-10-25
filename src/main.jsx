@@ -39,6 +39,7 @@ function Icon({ name, size = 20 }) {
     info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></>,
     leaf: <><path d="M12 21V8"/><path d="M12 13C8 13 5 10 5 6c4 0 7 3 7 7Z"/><path d="M12 16c4 0 7-3 7-7-4 0-7 3-7 7Z"/></>,
     chevron: <path d="m9 18 6-6-6-6"/>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
@@ -47,6 +48,7 @@ function Storefront() {
   const [packs, setPacks] = useState(FALLBACK_PACKS);
   const [selectedPack, setSelectedPack] = useState(FALLBACK_PACKS[0]);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [inventoryLots, setInventoryLots] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
   const [promoInput, setPromoInput] = useState('');
@@ -72,6 +74,7 @@ function Storefront() {
         available: Number(pack.available_packs ?? 0),
       }));
       setPacks(next);
+      setInventoryLots(Array.isArray(data.lots) ? data.lots : []);
       setSelectedPack(current => next.find(pack => pack.code === current.code) || next[0]);
     }).catch(() => {
       // Keep the current display usable if the backend is temporarily unavailable.
@@ -81,6 +84,24 @@ function Storefront() {
 
   const unit = useMemo(() => selectedPack.price / selectedPack.qty, [selectedPack]);
   const selectedInStock = selectedPack.available == null || selectedPack.available > 0;
+  const selectedExpiry = useMemo(() => {
+    const now = new Date();
+    const eligible = inventoryLots.filter(lot => {
+      if (lot.status !== 'available' || !lot.expiry_date) return false;
+      const expiry = new Date(`${lot.expiry_date}T23:59:59Z`);
+      if (!(expiry > now)) return false;
+      if (selectedPack.code === 'case') {
+        return Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)) >= 1;
+      }
+      const freeLoose = Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0));
+      return freeLoose >= Number(selectedPack.qty || 1);
+    });
+    eligible.sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+    return eligible[0]?.expiry_date || '';
+  }, [inventoryLots, selectedPack]);
+  const selectedExpiryLabel = selectedExpiry
+    ? new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${selectedExpiry}T12:00:00Z`))
+    : 'Not currently available';
   const addToCart = () => {
     if (!selectedInStock) return;
     setCart(selectedPack);
@@ -171,6 +192,14 @@ function Storefront() {
         <div className="eyebrow"><span/> Canadian medical supply</div>
         <h1>Bacteriostatic Water<br/><em>for Injection USP</em></h1>
         <p className="subline">30 mL multidose vial · DIN 00038202 · Pfizer Canada ULC</p>
+        <div className="expiry-reference" aria-live="polite">
+          <div className="expiry-reference-icon"><Icon name="calendar" size={19}/></div>
+          <div className="expiry-reference-copy">
+            <span>Current inventory expiry</span>
+            <strong>{selectedExpiryLabel}</strong>
+            <small>Based on available {selectedPack.label.toLowerCase()} inventory.</small>
+          </div>
+        </div>
         <div className="hero-price-row"><div><span>From</span><strong>${Math.min(...packs.map(p=>p.price)).toFixed(2)} <small>CAD</small></strong></div><div className={`stock ${selectedInStock?'':'out'}`}><i/>{selectedInStock?'In stock':'Unavailable'}</div></div>
         <div className="divider"/>
         <div className="pack-label"><span>Choose quantity</span><b>{selectedPack.label}</b></div>
