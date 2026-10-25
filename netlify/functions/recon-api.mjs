@@ -26,34 +26,59 @@ async function getReconShippingMode(db) {
   return { mode: mode === 'flat_25' ? 'flat_25' : 'chitchats', flat_rate_cad: FLAT_CANADA_RATE_CAD };
 }
 
-async function requireShippingAdmin(event, db) {
+function isMissingRelation(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === '42P01' || code === 'PGRST205' || /does not exist|schema cache|could not find the table/i.test(message);
+}
+
+async function requireReconAdmin(event, db, allowedProfileRoles = null) {
   const header = String(event.headers?.authorization || event.headers?.Authorization || '');
   const token = header.replace(/^Bearer\s+/i, '').trim();
   if (!token) throw Object.assign(new Error('Administrator authentication required.'), { statusCode: 401 });
+
   const { data: authData, error: authError } = await db.auth.getUser(token);
-  if (authError || !authData?.user?.id) throw Object.assign(new Error('Administrator session is invalid or expired.'), { statusCode: 401 });
-  const { data: profile, error } = await db.from('profiles').select('id,role,active').eq('id', authData.user.id).maybeSingle();
-  if (error) throw error;
+  const user = authData?.user;
+  if (authError || !user?.id) throw Object.assign(new Error('Administrator session is invalid or expired.'), { statusCode: 401 });
+
+  // Recon Water's established administrator system is public.admin_users. Keep
+  // that as the primary authorization source so optional profile/RBAC tables do
+  // not make the inventory or shipping modules unavailable.
+  const { data: adminRows, error: adminError } = await db.from('admin_users').select('*').limit(250);
+  if (!adminError) {
+    const email = String(user.email || '').toLowerCase();
+    const allowed = (adminRows || []).some(row =>
+      row?.user_id === user.id || row?.id === user.id ||
+      (row?.email && email && String(row.email).toLowerCase() === email)
+    );
+    if (allowed) return user;
+    throw Object.assign(new Error('Administrator permission required.'), { statusCode: 403 });
+  }
+  if (!isMissingRelation(adminError)) throw adminError;
+
+  // Compatibility fallback for deployments that migrated admin authorization to
+  // public.profiles. A missing profiles relation is treated as an auth-schema
+  // compatibility condition, not as a batch-inventory failure.
+  const { data: profile, error: profileError } = await db.from('profiles').select('id,role,active').eq('id', user.id).maybeSingle();
+  if (profileError) {
+    if (isMissingRelation(profileError)) {
+      throw Object.assign(new Error('Administrator authorization table is unavailable.'), { statusCode: 503 });
+    }
+    throw profileError;
+  }
   const role = String(profile?.role || '').toLowerCase();
-  if (!profile?.active || !['owner','admin'].includes(role)) throw Object.assign(new Error('Administrator permission required.'), { statusCode: 403 });
-  return authData.user;
+  if (!profile?.active || (allowedProfileRoles && !allowedProfileRoles.includes(role))) {
+    throw Object.assign(new Error('Administrator permission required.'), { statusCode: 403 });
+  }
+  return user;
+}
+
+async function requireShippingAdmin(event, db) {
+  return requireReconAdmin(event, db, ['owner','admin']);
 }
 
 async function requireInventoryAdmin(event, db) {
-  const header = String(event.headers?.authorization || event.headers?.Authorization || '');
-  const token = header.replace(/^Bearer\s+/i, '').trim();
-  if (!token) throw Object.assign(new Error('Administrator authentication required.'), { statusCode: 401 });
-  const { data: authData, error: authError } = await db.auth.getUser(token);
-  if (authError || !authData?.user?.id) throw Object.assign(new Error('Administrator session is invalid or expired.'), { statusCode: 401 });
-  const { data: profile, error } = await db.from('profiles').select('id,role,active').eq('id', authData.user.id).maybeSingle();
-  if (error) throw error;
-  const role = String(profile?.role || '').toLowerCase();
-  if (!profile?.active || !['owner','admin','fulfillment'].includes(role)) throw Object.assign(new Error('Inventory permission required.'), { statusCode: 403 });
-  return authData.user;
-}
-
-function isMissingRelation(error) {
-  return String(error?.code || '') === '42P01' || /does not exist/i.test(String(error?.message || ''));
+  return requireReconAdmin(event, db, ['owner','admin','fulfillment','manager']);
 }
 
 async function loadBatchState(db, productId, includeMovements = false) {
