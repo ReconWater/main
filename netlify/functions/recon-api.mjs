@@ -204,68 +204,68 @@ async function loadCatalogue(db, includeInactive = false) {
   const product = await findReconProduct(db);
   const batch = await loadBatchState(db, product.id, false);
   const summary = batchSummary(batch.lots);
-  let q = db.from('product_variants')
-    .select('id,product_id,market,sku,strength,package_type,package_quantity,currency,price,active,metadata,fulfillment_policy,inventory_pool_variant_id,updated_at')
-    .eq('product_id', product.id)
-    .eq('market', 'domestic')
-    .order('package_quantity', { ascending: true });
-  if (!includeInactive) q = q.eq('active', true).gt('price', 0);
-  const { data: variants, error } = await q;
+  const { data: rawRows, error } = await db.rpc('recon_storefront_catalogue_bridge');
   if (error) throw error;
-  const ids = [...new Set((variants || []).flatMap(v => [v.id, v.inventory_pool_variant_id]).filter(Boolean))];
-  const { data: inventory, error: invError } = ids.length
-    ? await db.from('inventory').select('variant_id,on_hand,reserved,incoming_quantity,incoming_eta,inventory_note,updated_at').in('variant_id', ids)
-    : { data: [], error: null };
-  if (invError) throw invError;
-  const inv = new Map((inventory || []).map(row => [row.variant_id, row]));
-  const packages = (variants || []).map(v => {
-    const sourceId = v.inventory_pool_variant_id || v.id;
-    const row = inv.get(sourceId);
-    const free = row ? Math.max(0, Number(row.on_hand || 0) - Number(row.reserved || 0)) : 0;
+  const variants = Array.isArray(rawRows) ? rawRows : [];
+  const filtered = includeInactive ? variants : variants.filter(v => v.active !== false && Number(v.price || 0) > 0);
+  const packages = filtered.map(v => {
     const packQty = Math.max(1, Number(v.package_quantity || 1));
-    const stockKind = String(v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose';
-    const sharedPool = !!v.inventory_pool_variant_id && v.inventory_pool_variant_id !== v.id;
+    const stockKind = String(v.stock_kind || v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose';
     const batchAvailable = stockKind === 'sealed' ? summary.sealed_available : Math.floor(summary.loose_available / packQty);
-    const legacyAvailable = v.fulfillment_policy === 'unlimited' ? 999999 : sharedPool ? Math.floor(free / packQty) : free;
+    const legacyAvailable = Number.isFinite(Number(v.available_packs)) ? Math.max(0, Number(v.available_packs)) : 0;
     return {
       id: v.id,
       product_id: v.product_id,
-      code: packageCode(packQty),
+      code: v.code || packageCode(packQty),
       sku: v.sku,
-      label: packageLabel(v),
+      label: v.label || packageLabel(v),
       vials_per_pack: packQty,
       stock_kind: stockKind,
       price_cents: cents(v.price),
-      active: !!v.active,
-      max_per_request: 100,
+      active: v.active !== false,
+      max_per_request: Number(v.max_per_request || 100),
       available_packs: batch.enabled ? batchAvailable : legacyAvailable,
       currency: String(v.currency || 'CAD').trim(),
-      fulfillment_policy: v.fulfillment_policy,
-      incoming_quantity: Number(row?.incoming_quantity || 0),
-      incoming_eta: row?.incoming_eta || null,
+      fulfillment_policy: v.fulfillment_policy || 'finite',
+      incoming_quantity: Number(v.incoming_quantity || 0),
+      incoming_eta: v.incoming_eta || null,
     };
   });
   return { product, packages, lots: batch.enabled ? batch.lots : [], batch_inventory: { installed: batch.installed, enabled: batch.enabled, summary } };
 }
 
 async function loadVariant(db, id, market = 'domestic') {
-  const { data, error } = await db.from('product_variants')
-    .select('id,product_id,market,sku,package_type,package_quantity,currency,price,active,metadata,fulfillment_policy,inventory_pool_variant_id')
-    .eq('id', id).eq('market', market).eq('active', true).maybeSingle();
+  const { data, error } = await db.rpc('recon_storefront_variant_bridge', {
+    p_identifier: String(id || ''),
+    p_market: String(market || 'domestic'),
+  });
   if (error) throw error;
-  return data || null;
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
 }
 
 async function validatePromo(db, rawCode, subtotal) {
   const code = normalizeCode(rawCode);
   if (!validCode(code)) return null;
-  const { data, error } = await db.rpc('validate_promo_code', { p_code: code, p_market: 'domestic', p_subtotal: Number(subtotal) });
+  const subtotalCents = cents(subtotal);
+  const { data: promo, error } = await db.from('promo_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
   if (error) throw error;
-  if (!data || !data.valid) return null;
+  if (!promo) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  if ((promo.starts_on && String(promo.starts_on) > today) || (promo.ends_on && String(promo.ends_on) < today)) return null;
+  if (promo.max_uses != null && Number(promo.uses_count || 0) >= Number(promo.max_uses)) return null;
+  if (subtotalCents < Number(promo.min_subtotal_cents || 0)) return null;
+  let discountCents = 0;
+  if (String(promo.discount_type) === 'percentage') {
+    discountCents = Math.floor(subtotalCents * Number(promo.discount_value || 0) / 100);
+  } else if (String(promo.discount_type) === 'fixed') {
+    discountCents = Number(promo.discount_value || 0);
+  }
+  discountCents = Math.max(0, Math.min(subtotalCents, Math.round(discountCents)));
+  if (discountCents <= 0) return null;
   return {
-    code: String(data.code || code).toUpperCase(),
-    discount: Number(data.discount || 0),
-    total: Number(data.total ?? (Number(subtotal) - Number(data.discount || 0))),
+    code: String(promo.code || code).toUpperCase(),
+    discount: discountCents / 100,
+    total: Math.max(0, subtotalCents - discountCents) / 100,
   };
 }
 
