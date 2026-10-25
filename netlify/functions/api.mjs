@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { randomBytes } from 'node:crypto';
-import {packageAvailability,packageExpiry} from '../../src/availability.js';
+import {packageAvailability} from '../../src/availability.js';
 import {chitChatsConfigured,chitChatsEnvironment} from './_chitchats.mjs';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -28,26 +27,6 @@ async function validatePromo(db,rawCode,subtotal){
   if(discount<=0) throw new Error('Promo code is invalid or unavailable');
   return {promo,discount,final:Math.max(0,Number(subtotal)-discount)};
 }
-const newReferralRewardCode = () => `REF5-${randomBytes(4).toString('hex').toUpperCase()}`;
-async function createReferralReward(db,referralId,sourceOrderId){
-  const {data:existing,error:existingError}=await db.from('referral_rewards').select('*').eq('source_order_id',sourceOrderId).maybeSingle();
-  if(existingError) throw existingError;
-  if(existing?.reward_code) return {reward:existing,created:false};
-  for(let attempt=0;attempt<4;attempt++){
-    const code=newReferralRewardCode();
-    if(existing){
-      const {data,error}=await db.from('referral_rewards').update({reward_code:code}).eq('id',existing.id).is('reward_code',null).select('*').maybeSingle();
-      if(!error&&data) return {reward:data,created:false};
-      if(error?.code!=='23505'&&error) throw error;
-    }else{
-      const {data,error}=await db.from('referral_rewards').insert({referral_id:referralId,source_order_id:sourceOrderId,reward_code:code}).select('*').single();
-      if(!error) return {reward:data,created:true};
-      if(error?.code!=='23505') throw error;
-    }
-  }
-  throw new Error('Referral reward code could not be created');
-}
-
 async function secureDomesticSubtotal(db,items){
   if(!Array.isArray(items)||items.length<1||items.length>4) throw new Error('Invalid package selection');
   const ids=[...new Set(items.map(i=>String(i?.package_id||'')).filter(Boolean))];
@@ -112,7 +91,7 @@ export default async request => {
       const product=p.data?.[0]||null;
       const stock=(l.data||[]).filter(lot=>lot.product_id===product?.id);
       const counts=packageAvailability((v.data||[]).filter(q=>q.product_id===product?.id),stock);
-      const packages=(v.data||[]).filter(q=>q.product_id===product?.id&&q.active&&Number(q.price_cents)>0).map(q=>({...q,available_packages:counts.byId[q.id]??0,earliest_expiry:packageExpiry(q,stock)}));
+      const packages=(v.data||[]).filter(q=>q.product_id===product?.id).map(q=>({...q,available_packages:counts.byId[q.id]??0}));
       return reply({product,packages,stock:{loose:counts.loose,sealed:counts.sealed}});
     }
     if(request.method!=='POST') return reply({error:'Method not allowed'},405);
@@ -211,15 +190,11 @@ export default async request => {
         }
       };
 
-      const [promos,paymentSettings,referrals,rewards,shippingProfiles]=await Promise.all([
+      const [promos,paymentSettings,shippingProfiles]=await Promise.all([
         optionalModule('promos','Promo codes','supabase/006_promo_codes.sql',
           db.from('promo_codes').select('id,code,discount_type,discount_value,min_subtotal_cents,max_uses,uses_count,starts_on,ends_on,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
         optionalModule('payments','Payment methods','supabase/008_manual_payments.sql',
           db.from('payment_settings').select('id,etransfer_enabled,etransfer_email,etransfer_recipient_name,etransfer_note,usdc_eth_enabled,usdc_eth_address,usdc_note,updated_at').eq('id',1).maybeSingle(),null),
-        optionalModule('referrals','Referral accounts','supabase/009_referral_system.sql',
-          db.from('referral_codes').select('id,code,referrer_name,referrer_email,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
-        optionalModule('referrals','Referral rewards','supabase/009_referral_system.sql',
-          db.from('referral_rewards').select('id,referral_id,source_order_id,reward_code,redeemed_order_id,redeemed_at,created_at').order('created_at',{ascending:false}),[]),
         optionalModule('shipping','Chit Chats shipping','supabase/010_chitchats_shipping.sql',
           db.from('shipping_profiles').select('*').order('market').order('vial_quantity',{ascending:true,nullsFirst:false}),[])
       ]);
@@ -228,7 +203,7 @@ export default async request => {
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
-        referrals,referralRewards:rewards,shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},moduleWarnings:warnings});
+        referrals:[],referralRewards:[],shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},moduleWarnings:warnings});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -253,23 +228,12 @@ export default async request => {
       p_reason:body.reason,p_actor:user.id});return reply({ok:true});}
     if(action==='open-case') {await rpc('service_admin_open_case_v2',{p_lot_id:body.lot_id,p_actor:user.id});return reply({ok:true});}
     if(action==='order-status') {
-      let transitionOrder=null,rewardCreated=false;
       if(body.status==='fulfilled'){
-        const {data:order,error}=await db.from('orders').select('id,payment_method,payment_status,referral_id').eq('id',body.order_id).maybeSingle();
+        const {data:order,error}=await db.from('orders').select('id,payment_method,payment_status').eq('id',body.order_id).maybeSingle();
         if(error) throw error;
-        transitionOrder=order;
         if(order?.payment_method && order.payment_status!=='paid') return reply({error:'Payment must be marked paid before fulfillment'},409);
-        if(order?.referral_id){
-          const result=await createReferralReward(db,order.referral_id,body.order_id);
-          rewardCreated=result.created;
-        }
       }
-      try{
-        await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
-      }catch(error){
-        if(rewardCreated) await db.from('referral_rewards').delete().eq('source_order_id',body.order_id);
-        throw error;
-      }
+      await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
       if(body.status==='cancelled') await db.from('orders').update({payment_status:'cancelled'}).eq('id',body.order_id).neq('payment_status','paid');
       return reply({ok:true});
     }
@@ -295,20 +259,7 @@ export default async request => {
       if(result.error) throw result.error;
       return reply({promo:result.data});
     }
-    if(action==='save-referral') {
-      const id=body.id?String(body.id):null;
-      const code=String(body.code||'').trim().toUpperCase();
-      const name=String(body.referrer_name||'').trim();
-      const email=String(body.referrer_email||'').trim().toLowerCase();
-      if(!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) return reply({error:'Referral code must be 3-32 characters using letters, numbers, hyphens or underscores'},400);
-      if(name.length<2||name.length>120||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({error:'Enter a valid referrer name and email'},400);
-      const payload={code,referrer_name:name,referrer_email:email,active:!!body.active,internal_note:String(body.internal_note||'').slice(0,300),updated_at:new Date().toISOString()};
-      let result;
-      if(id) result=await db.from('referral_codes').update(payload).eq('id',id).select('*').single();
-      else result=await db.from('referral_codes').insert(payload).select('*').single();
-      if(result.error) throw result.error;
-      return reply({referral:result.data});
-    }
+    if(action==='save-referral') return reply({error:'The referral program is temporarily disabled while it is being upgraded.'},410);
 
     if(action==='save-shipping-profile'){
       const id=body.id?String(body.id):null;

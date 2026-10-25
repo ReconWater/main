@@ -47,18 +47,12 @@ function Storefront() {
   const [packs, setPacks] = useState(FALLBACK_PACKS);
   const [selectedPack, setSelectedPack] = useState(FALLBACK_PACKS[0]);
   const [selectedImage, setSelectedImage] = useState(0);
-  const [inventoryState, setInventoryState] = useState('loading');
+  const [inventoryLots, setInventoryLots] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [cart, setCart] = useState(null);
   const [promoInput, setPromoInput] = useState('');
   const [promo, setPromo] = useState(null);
   const [promoState, setPromoState] = useState({ busy: false, message: '', error: false });
-  const [referralInput, setReferralInput] = useState('');
-  const [referral, setReferral] = useState(null);
-  const [referralState, setReferralState] = useState({ busy: false, message: '', error: false });
-  const [rewardInput, setRewardInput] = useState('');
-  const [reward, setReward] = useState(null);
-  const [rewardState, setRewardState] = useState({ busy: false, message: '', error: false });
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', address: '', city: '', region: 'ON', postal: '', notes: '' });
   const [checkoutState, setCheckoutState] = useState({ busy: false, ok: false, message: '', orderNumber: '' });
@@ -69,60 +63,61 @@ function Storefront() {
   const [shippingState, setShippingState] = useState({ busy: false, message: '' });
 
   useEffect(() => {
-    let alive = true, generation = 0;
-    const load = async () => {
-      const request = ++generation;
-      try {
-        const response = await fetch('/.netlify/functions/api?action=catalogue', {cache:'no-store'});
-        if (!response.ok) throw new Error('Inventory unavailable');
-        const data = await response.json();
-        if (!alive || request !== generation) return;
-        const next = (data.packages || []).map(pack => ({
-          id:pack.id, code:pack.code, sku:pack.sku, label:pack.label,
-          qty:Number(pack.vials_per_pack), price:Number(pack.price_cents)/100,
-          note:`$${(Number(pack.price_cents)/100/Number(pack.vials_per_pack)).toFixed(2)} / vial`,
-          badge:pack.code==='ten'?'Popular':pack.code==='case'?'Best value':undefined,
-          available:Number(pack.available_packages || 0), expiry:pack.earliest_expiry || null,
-        }));
-        setPacks(next.length ? next : FALLBACK_PACKS);
-        setSelectedPack(current => next.find(pack=>pack.id===current.id || pack.code===current.code) || next[0] || {...FALLBACK_PACKS[0],available:0});
-        setInventoryState('ready');
-      } catch {
-        if (alive && request===generation) setInventoryState('error');
-      }
-    };
-    const visible = () => {if(document.visibilityState==='visible') load();};
-    load();
-    const timer=setInterval(visible,60000);
-    window.addEventListener('focus',visible);
-    document.addEventListener('visibilitychange',visible);
-    return () => {alive=false;clearInterval(timer);window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);};
+    let alive = true;
+    apiRequest('catalogue').then(data => {
+      if (!alive || !data?.packages?.length) return;
+      const next = data.packages.map(pack => ({
+        id: pack.id,
+        code: pack.code,
+        sku: pack.sku,
+        label: pack.label,
+        qty: Number(pack.vials_per_pack),
+        price: Number(pack.price_cents) / 100,
+        note: `$${(Number(pack.price_cents) / 100 / Number(pack.vials_per_pack)).toFixed(2)} / vial`,
+        badge: pack.code === 'ten' ? 'Popular' : pack.code === 'case' ? 'Best value' : undefined,
+        available: Number(pack.available_packs ?? 0),
+      }));
+      setPacks(next);
+      setInventoryLots(Array.isArray(data.lots) ? data.lots : []);
+      setSelectedPack(current => next.find(pack => pack.code === current.code) || next[0]);
+    }).catch(() => {
+      // Keep the current display usable if the backend is temporarily unavailable.
+    });
+    return () => { alive = false; };
   }, []);
 
   const unit = useMemo(() => selectedPack.price / selectedPack.qty, [selectedPack]);
-  const selectedInStock = inventoryState==='ready' && selectedPack.available > 0;
-  const selectedExpiry = selectedInStock ? selectedPack.expiry : null;
-  const selectedExpiryLabel = inventoryState==='loading' ? 'Checking inventory…'
-    : inventoryState==='error' ? 'Inventory temporarily unavailable'
-    : selectedExpiry
-      ? new Intl.DateTimeFormat('en-CA', {year:'numeric',month:'long',day:'numeric',timeZone:'UTC'}).format(new Date(`${selectedExpiry}T12:00:00Z`))
-      : 'No available batch';
+  const selectedInStock = selectedPack.available == null || selectedPack.available > 0;
+  const selectedExpiry = useMemo(() => {
+    const now = new Date();
+    const eligible = inventoryLots.filter(lot => {
+      if (lot.status !== 'available' || !lot.expiry_date) return false;
+      const expiry = new Date(`${lot.expiry_date}T23:59:59Z`);
+      if (!(expiry > now)) return false;
+      if (selectedPack.code === 'case') {
+        return Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)) >= 1;
+      }
+      const freeLoose = Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0));
+      return freeLoose >= Number(selectedPack.qty || 1);
+    });
+    eligible.sort((a, b) => String(a.expiry_date).localeCompare(String(b.expiry_date)));
+    return eligible[0]?.expiry_date || '';
+  }, [inventoryLots, selectedPack]);
+  const selectedExpiryLabel = selectedExpiry
+    ? new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${selectedExpiry}T12:00:00Z`))
+    : 'Not currently available';
   const addToCart = () => {
     if (!selectedInStock) return;
     setCart(selectedPack);
     setPromo(null);
     setPromoInput('');
     setPromoState({ busy: false, message: '', error: false });
-    setReferral(null);setReferralInput('');setReferralState({ busy: false, message: '', error: false });
-    setReward(null);setRewardInput('');setRewardState({ busy: false, message: '', error: false });
     setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:''});
     setCartOpen(true);
   };
   const cartSubtotalCents = cart ? Math.round(Number(cart.price) * 100) : 0;
   const cartDiscountCents = promo ? Number(promo.discount_cents || 0) : 0;
-  const cartAfterPromoCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
-  const cartRewardDiscountCents = reward ? Math.min(cartAfterPromoCents, Math.floor(cartAfterPromoCents * 0.05)) : 0;
-  const cartTotalCents = Math.max(0, cartAfterPromoCents - cartRewardDiscountCents);
+  const cartTotalCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
   const shippingChargeCents = selectedShipping ? Number(selectedShipping.amount_cents || 0) : 0;
   const checkoutGrandTotalCents = cartTotalCents + shippingChargeCents;
   const formattedPostal = formatCanadianPostal(checkoutForm.postal);
@@ -159,7 +154,6 @@ function Storefront() {
       });
       setPromo(result);
       setPromoInput(result.code);
-      setReward(null);setRewardState({ busy: false, message: reward ? 'Reapply your referral reward after changing the promo code.' : '', error: false });
       setPromoState({ busy: false, message: `${result.code} applied`, error: false });
     } catch (error) {
       setPromo(null);
@@ -170,41 +164,10 @@ function Storefront() {
     setPromo(null);
     setPromoInput('');
     setPromoState({ busy: false, message: '', error: false });
-    if (reward) { setReward(null); setRewardState({ busy: false, message: 'Reapply your referral reward after changing the promo code.', error: false }); }
   }
-  async function applyReferral(event) {
-    event.preventDefault();
-    if (!referralInput.trim()) return;
-    if (!checkoutForm.email.trim()) { setReferralState({ busy: false, message: 'Enter your checkout email before applying a referral code.', error: true }); return; }
-    setReferralState({ busy: true, message: '', error: false });
-    try {
-      const result = await apiRequest('referral-validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ purpose: 'attribution', code: referralInput, email: checkoutForm.email }) });
-      setReferral(result);setReferralInput(result.code);setReferralState({ busy: false, message: 'Referral recognized. Your referrer will earn a reward after fulfillment.', error: false });
-    } catch (error) {
-      setReferral(null);setReferralState({ busy: false, message: error.message || 'Referral code could not be applied.', error: true });
-    }
-  }
-  function removeReferral() { setReferral(null);setReferralInput('');setReferralState({ busy: false, message: '', error: false }); }
-  async function applyReward(event) {
-    event.preventDefault();
-    if (!cart || !rewardInput.trim()) return;
-    if (!checkoutForm.email.trim()) { setRewardState({ busy: false, message: 'Enter your checkout email before applying a referral reward.', error: true }); return; }
-    setRewardState({ busy: true, message: '', error: false });
-    try {
-      const result = await apiRequest('referral-validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ purpose: 'reward', code: rewardInput, package_id: cart.id, promo_code: promo?.code || null, email: checkoutForm.email }) });
-      setReward(result);setRewardInput(result.code);setRewardState({ busy: false, message: `${result.code} reward applied · 5% off`, error: false });
-    } catch (error) {
-      setReward(null);setRewardState({ busy: false, message: error.message || 'Referral reward could not be applied.', error: true });
-    }
-  }
-  function removeReward() { setReward(null);setRewardInput('');setRewardState({ busy: false, message: '', error: false }); }
   const patchCheckout = (key, value) => {
     setCheckoutForm(current => ({ ...current, [key]: value }));
     if (['name','email','address','city','region','postal'].includes(key)) { setShippingRates([]);setSelectedShipping(null);setShippingQuote(null); }
-    if (key === 'email') {
-      if (reward) { setReward(null); setRewardState({ busy: false, message: 'Reapply the referral reward after changing your email.', error: false }); }
-      if (referral) { setReferral(null); setReferralState({ busy: false, message: 'Reapply the referral code after changing your email.', error: false }); }
-    }
   };
   async function submitDomestic(event) {
     event.preventDefault();
@@ -219,8 +182,6 @@ function Storefront() {
           email: checkoutForm.email,
           package_id: cart.id,
           promo_code: promo?.code || null,
-          referral_code: referral?.code || null,
-          referral_reward_code: reward?.code || null,
           shipping: {
             address: checkoutForm.address,
             city: checkoutForm.city,
@@ -237,8 +198,6 @@ function Storefront() {
       setCheckoutState({ busy: false, ok: true, message: 'Request received. Payment is not due until the order is reviewed and approved.', orderNumber: result.order_number || '' });
       setCart(null);
       setPromo(null);setPromoInput('');
-      setReferral(null);setReferralInput('');
-      setReward(null);setRewardInput('');
       setCartOpen(false);
     } catch (error) {
       const message = error.message || 'Could not submit request.';
@@ -279,7 +238,7 @@ function Storefront() {
             <small>Based on available {selectedPack.label.toLowerCase()} inventory.</small>
           </div>
         </div>
-        <div className="hero-price-row"><div><span>From</span><strong>${Math.min(...packs.map(p=>p.price)).toFixed(2)} <small>CAD</small></strong></div><div className={`stock ${selectedInStock?'':'out'}`}><i/>{inventoryState==='loading'?'Checking stock':inventoryState==='error'?'Stock unavailable':selectedInStock?'In stock':'Unavailable'}</div></div>
+        <div className="hero-price-row"><div><span>From</span><strong>${Math.min(...packs.map(p=>p.price)).toFixed(2)} <small>CAD</small></strong></div><div className={`stock ${selectedInStock?'':'out'}`}><i/>{selectedInStock?'In stock':'Unavailable'}</div></div>
         <div className="divider"/>
         <div className="pack-label"><span>Choose quantity</span><b>{selectedPack.label}</b></div>
         <div className="pack-grid">{packs.map(pack=><button key={pack.id} onClick={()=>setSelectedPack(pack)} className={`pack-card ${selectedPack.id===pack.id?'selected':''} ${pack.available===0?'sold-out':''}`}>
@@ -309,23 +268,20 @@ function Storefront() {
       <section className="store-checkout-card" role="dialog" aria-modal="true" aria-label="Canadian checkout">
         <button className="store-checkout-x" type="button" onClick={()=>setCheckoutOpen(false)} disabled={checkoutState.busy}>×</button>
         {checkoutState.ok?<div className="store-checkout-success"><span>REQUEST RECEIVED</span><h2>{checkoutState.orderNumber||'Order submitted'}</h2><p>{checkoutState.message}</p><div className="store-payment-method"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Do not send funds yet. You will receive the exact CAD amount, e-Transfer address and order reference after approval.</p></div><button type="button" onClick={()=>setCheckoutOpen(false)}>Close</button></div>:<>
-          <div className="store-checkout-head"><span>CANADIAN CHECKOUT</span><h2>Review your price.</h2><p>Apply a promo code and, if earned, a referral reward. Your final product total updates before you submit the request.</p></div>
+          <div className="store-checkout-head"><span>CANADIAN CHECKOUT</span><h2>Review your price.</h2><p>Apply a promo code if you have one. Your final product total updates before you submit the request.</p></div>
           <div className="checkout-price-panel">
             <div className="checkout-price-product"><div><span>SELECTED PACKAGE</span><strong>{cart?.label||'Selected package'}</strong></div><b>${money(cartSubtotalCents/100)} CAD</b></div>
             <div className="checkout-price-lines">
               <div><span>Product subtotal</span><strong>${money(cartSubtotalCents/100)} CAD</strong></div>
               {promo&&<div className="checkout-discount-line"><span>Promo · {promo.code}</span><strong>−${money(cartDiscountCents/100)} CAD</strong></div>}
-              {reward&&<div className="checkout-discount-line referral-reward-line"><span>Referral reward · {reward.code}</span><strong>−${money(cartRewardDiscountCents/100)} CAD</strong></div>}
               <div><span>Product total</span><strong>${money(cartTotalCents/100)} CAD</strong></div>
               <div className="checkout-shipping-line"><span>{selectedShipping?.service_name || 'Delivery'}</span><strong>{shippingState.busy?'Calculating…':selectedShipping?`$${money(shippingChargeCents/100)} CAD`:'Select a shipping rate'}</strong></div>
               <div className="checkout-final-line"><span>Order total</span><strong>{selectedShipping?`$${money(checkoutGrandTotalCents/100)} CAD`:'—'}</strong></div>
             </div>
             <div className="checkout-code-grid">
               <form className="checkout-promo-form" onSubmit={applyPromo}><label htmlFor="checkout-promo-code">Promo code</label><div><input id="checkout-promo-code" value={promoInput} onChange={e=>setPromoInput(e.target.value.toUpperCase())} placeholder="Enter promo code" maxLength="32" disabled={promoState.busy}/>{promo?<button type="button" className="promo-remove" onClick={removePromo}>Remove</button>:<button type="submit" disabled={promoState.busy||!promoInput.trim()}>{promoState.busy?'Checking…':'Apply'}</button>}</div>{promoState.message&&<p className={`promo-message ${promoState.error?'is-error':'is-valid'}`} role="status">{promoState.message}</p>}</form>
-              <form className="checkout-promo-form referral-reward-form" onSubmit={applyReward}><label htmlFor="checkout-reward-code">Referral reward</label><div><input id="checkout-reward-code" value={rewardInput} onChange={e=>setRewardInput(e.target.value.toUpperCase())} placeholder="REF5-XXXXXXXX" maxLength="32" disabled={rewardState.busy}/>{reward?<button type="button" className="promo-remove" onClick={removeReward}>Remove</button>:<button type="submit" disabled={rewardState.busy||!rewardInput.trim()}>{rewardState.busy?'Checking…':'Apply 5%'}</button>}</div>{rewardState.message&&<p className={`promo-message ${rewardState.error?'is-error':'is-valid'}`} role="status">{rewardState.message}</p>}<small>Each reward code is single-use for 5% off and stacks after your promo code.</small></form>
             </div>
-            <form className="checkout-referral-form" onSubmit={applyReferral}><div><label htmlFor="checkout-referral-code">Were you referred by someone?</label><small>Enter their referral code. Your order price does not change; they earn a 5% reward after your order is fulfilled.</small></div><div className="checkout-referral-control"><input id="checkout-referral-code" value={referralInput} onChange={e=>setReferralInput(e.target.value.toUpperCase())} placeholder="Referral code" maxLength="32" disabled={referralState.busy}/>{referral?<button type="button" className="promo-remove" onClick={removeReferral}>Remove</button>:<button type="submit" disabled={referralState.busy||!referralInput.trim()}>{referralState.busy?'Checking…':'Apply'}</button>}</div>{referralState.message&&<p className={`promo-message ${referralState.error?'is-error':'is-valid'}`} role="status">{referralState.message}</p>}</form>
-            <p className="checkout-price-note">Referral rewards are single-use and available only to the email registered to that referral code. Regular promo codes and one referral reward can be used together. A current shipping rate is required before a Canadian order can be submitted.</p>
+            <p className="checkout-price-note">The referral program is temporarily unavailable while it is being upgraded. Existing referral records are preserved. A current shipping rate is required before a Canadian order can be submitted.</p>
           </div>
           <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="checkout-shipping-picker full"><div className="checkout-shipping-head"><div><span>DELIVERY</span><strong>{shippingRates.length?'Choose a delivery service':'Shipping rates'}</strong></div><Icon name="truck" size={20}/></div>{!shippingAddressReady?<p>Complete your delivery address to calculate shipping.</p>:shippingState.busy?<p>Calculating available shipping services…</p>:shippingRates.length?<div className="checkout-shipping-options">{shippingRates.map(rate=><label key={rate.quote_id||rate.service_code} className={selectedShipping?.quote_id===rate.quote_id?'selected':''}><input type="radio" name="shipping-service" checked={selectedShipping?.quote_id===rate.quote_id} onChange={()=>setSelectedShipping(rate)}/><span><b>{rate.service_name}</b><small>{[rate.estimate,rate.tracking].filter(Boolean).join(' · ')}</small></span><strong>${money(rate.amount_cents/100)} CAD</strong></label>)}</div>:<p>{shippingState.message||'Shipping rates are unavailable for this address.'}</p>}</div><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy||!selectedShipping}>{checkoutState.busy?'Submitting…':selectedShipping?<>Submit request · ${money(checkoutGrandTotalCents/100)} CAD <Icon name="chevron" size={17}/></>:'Select shipping to continue'}</button></form>
         </>}

@@ -41,15 +41,7 @@ async function getReconShippingMode(db) {
 function isMissingRelation(error) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
-  // PGRST205/42P01 are relation errors. Do NOT treat generic "schema cache"
-  // or PGRST204 as a missing table: PGRST204 is a missing-column error.
-  return code === '42P01' || code === 'PGRST205' || /could not find the table|relation [^ ]+ does not exist/i.test(message);
-}
-
-function isMissingFunction(error) {
-  const code = String(error?.code || '');
-  const message = String(error?.message || '');
-  return code === '42883' || code === 'PGRST202' || /function .* does not exist|could not find the function/i.test(message);
+  return code === '42P01' || code === 'PGRST205' || /does not exist|schema cache|could not find the table/i.test(message);
 }
 
 async function requireReconAdmin(event, db, allowedProfileRoles = null) {
@@ -137,106 +129,61 @@ function batchSummary(lots = []) {
   return { loose_on_hand:looseOnHand,loose_reserved:looseReserved,loose_available:looseAvailable,sealed_on_hand:sealedOnHand,sealed_reserved:sealedReserved,sealed_available:sealedAvailable,total_vial_equivalent:looseOnHand+(sealedOnHand*25),available_vial_equivalent:looseAvailable+(sealedAvailable*25) };
 }
 
-async function fetchProductById(db, productId) {
-  if (!productId) return null;
-  const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-
-function chooseReconProductId(variants = []) {
-  const known = new Set(['RW-BAC-01','RW-BAC-05','RW-BAC-10','RW-BAC-25']);
-  const groups = new Map();
-  for (const row of variants || []) {
-    const productId = String(row?.product_id || '').trim();
-    if (!productId) continue;
-    const sku = String(row?.sku || '').trim().toUpperCase();
-    const qty = Number(row?.package_quantity || 0);
-    const entry = groups.get(productId) || { productId, skus:new Set(), quantities:new Set(), active:0 };
-    if (sku) entry.skus.add(sku);
-    if (qty > 0) entry.quantities.add(qty);
-    if (row?.active) entry.active += 1;
-    groups.set(productId, entry);
-  }
-  const scored = [...groups.values()].map(entry => {
-    const exact = [...entry.skus].filter(sku => known.has(sku)).length;
-    const reconSku = [...entry.skus].filter(sku => sku.startsWith('RW-BAC-')).length;
-    const q = entry.quantities;
-    const structure = (q.has(1)?4:0)+(q.has(5)?2:0)+(q.has(10)?2:0)+(q.has(25)?4:0);
-    return { ...entry, score:(exact*20)+(reconSku*5)+structure+Math.min(entry.active,4) };
-  }).sort((a,b)=>b.score-a.score || b.skus.size-a.skus.size || a.productId.localeCompare(b.productId));
-  if (!scored.length || scored[0].score <= 0) return null;
-  return scored[0].productId;
-}
-
-async function bindReconInventoryProduct(db, productId) {
-  if (!productId) return;
-  const { error } = await db.rpc('recon_bind_inventory_product', { p_product_id: productId });
-  if (error && !isMissingFunction(error) && !isMissingRelation(error)) throw error;
-}
-
 async function findReconProduct(db) {
-  // 1) Explicit deployment configuration always wins.
+  // Prefer the batch inventory configuration because it already points at the
+  // exact parent product and does not depend on optional catalogue columns.
+  // This also keeps Lot Inventory tied to the same product it is managing.
   const configuredId = String(process.env.RECON_PRODUCT_ID || '').trim();
   if (configuredId) {
-    const product = await fetchProductById(db, configuredId);
-    if (product) { await bindReconInventoryProduct(db, product.id); return product; }
+    const { data, error } = await db.from('products').select('*').eq('id', configuredId).maybeSingle();
+    if (error) throw error;
+    if (data) return data;
   }
 
-  // 2) Existing batch config is authoritative when already bound.
   const { data: inventoryConfigs, error: configError } = await db
     .from('recon_inventory_config')
-    .select('product_id,enabled,updated_at')
-    .not('product_id','is',null)
-    .order('enabled',{ascending:false})
-    .order('updated_at',{ascending:false})
+    .select('product_id')
     .limit(10);
   if (!configError && inventoryConfigs?.length) {
-    for (const row of inventoryConfigs) {
-      const product = await fetchProductById(db, row.product_id);
-      if (product) { await bindReconInventoryProduct(db, product.id); return product; }
+    // A Recon Water deployment should normally have one configured product.
+    // Prefer an enabled row when multiple historical rows exist.
+    let productId = inventoryConfigs[0]?.product_id;
+    if (inventoryConfigs.length > 1) {
+      const { data: detailedConfigs } = await db
+        .from('recon_inventory_config')
+        .select('product_id,enabled,updated_at')
+        .order('enabled', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      productId = detailedConfigs?.[0]?.product_id || productId;
     }
-  } else if (configError && !isMissingRelation(configError) && String(configError?.code || '') !== 'PGRST204') {
+    if (productId) {
+      const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
+      if (error) throw error;
+      if (data) return data;
+    }
+  } else if (configError && !isMissingRelation(configError)) {
     throw configError;
   }
 
-  // 3) Resolve from the exact live storefront SKU family. This is the stable
-  // identifier in this project; product names/slugs are not used for binding.
-  const knownSkus = ['RW-BAC-01','RW-BAC-05','RW-BAC-10','RW-BAC-25'];
-  const { data: exactVariants, error: exactError } = await db.from('product_variants')
-    .select('product_id,sku,package_quantity,active')
-    .eq('market','domestic')
-    .in('sku',knownSkus)
-    .limit(100);
-  if (exactError) throw exactError;
-  let productId = chooseReconProductId(exactVariants || []);
-
-  // 4) Compatibility fallback for a renamed RW-BAC SKU while retaining the
-  // package structure used by this storefront.
-  if (!productId) {
-    const { data: domesticVariants, error: variantError } = await db.from('product_variants')
-      .select('product_id,sku,package_quantity,active')
-      .eq('market','domestic')
-      .limit(1000);
-    if (variantError) throw variantError;
-    productId = chooseReconProductId(domesticVariants || []);
-  }
-
-  if (productId) {
-    const product = await fetchProductById(db, productId);
-    if (product) { await bindReconInventoryProduct(db, product.id); return product; }
-  }
-
-  // 5) Last-resort human-readable lookup. This is never the primary binding.
+  // Schema-tolerant fallback for a fresh install before the batch config row is
+  // created. Read existing columns only; never require products.slug.
   const { data: products, error } = await db.from('products').select('*').limit(500);
   if (error) throw error;
-  const byName = (products || []).find(row => {
-    const name = String(row?.name || '').toLowerCase();
+  const rows = (products || []).filter(row => row && row.id);
+  const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim().toLowerCase();
+  const bySlug = configuredSlug
+    ? rows.find(row => String(row.slug || '').trim().toLowerCase() === configuredSlug)
+    : null;
+  if (bySlug) return bySlug;
+
+  const byName = rows.find(row => {
+    const name = String(row.name || '').toLowerCase();
     return name.includes('bacteriostatic') && name.includes('water');
   });
-  if (byName) { await bindReconInventoryProduct(db, byName.id); return byName; }
+  if (byName) return byName;
 
-  throw new Error('Recon Water product could not be resolved from the live RW-BAC variants.');
+  throw new Error('Recon Water product was not found. Set RECON_PRODUCT_ID in Netlify to the product UUID used by Lot Inventory.');
 }
 
 function packageCode(qty) {
@@ -402,7 +349,7 @@ export async function handler(event) {
           diagnostics: {
             ...database,
             missing_relation: 'public.recon_inventory_config',
-            installer: 'supabase/013_repair_batch_inventory_schema.sql'
+            installer: 'supabase/012_batch_inventory_REPAIR_INSTALL.sql'
           }
         });
       }
@@ -422,12 +369,12 @@ export async function handler(event) {
       const admin = await requireShippingAdmin(event, db);
       const requestedMode = String(body.mode || '').trim().toLowerCase();
       if (!['chitchats','flat_25'].includes(requestedMode)) return json(400, { error: 'Invalid shipping mode.' });
-      const { data, error } = await db.rpc('recon_save_shipping_mode', {
-        p_mode: requestedMode, p_actor: admin.id,
-      });
+      const value = { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD, updated_by: admin.id, updated_at: new Date().toISOString() };
+      const { error } = await db.from('app_settings').upsert({ key: 'recon_shipping_mode', value, public_read: false, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
       if (error) throw error;
-      return json(200, data);
-
+      const { error: expireError } = await db.from('shipping_quotes').update({ expires_at: new Date().toISOString() }).is('consumed_at', null).gt('expires_at', new Date().toISOString());
+      if (expireError) throw expireError;
+      return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
     }
 
     if (event.httpMethod === 'POST' && mode === 'inventory-receive') {
@@ -491,23 +438,7 @@ export async function handler(event) {
     }
 
     if (event.httpMethod === 'POST' && mode === 'referral-validate') {
-      const purpose = String(body.purpose || 'attribution');
-      if (purpose === 'attribution') {
-        const ref = await validateReferralAttribution(db, body.code, body.email);
-        if (!ref) return json(400, { error: 'Referral code is invalid or unavailable.' });
-        return json(200, { code: ref.code, valid: true });
-      }
-      const variant = await loadVariant(db, String(body.package_id || ''));
-      if (!variant) return json(400, { error: 'Referral reward could not be applied.' });
-      let eligible = Number(variant.price);
-      if (body.promo_code) {
-        const promo = await validatePromo(db, body.promo_code, eligible);
-        if (!promo) return json(409, { error: 'Your promo code is no longer available. Review your checkout total.' });
-        eligible = promo.total;
-      }
-      const reward = await validateReferralReward(db, body.code, body.email, eligible);
-      if (!reward) return json(400, { error: 'Referral reward is invalid, already used, or does not belong to this email.' });
-      return json(200, { code: normalizeCode(body.code), discount_cents: cents(reward.discount), final_subtotal_cents: cents(Math.max(0, eligible - reward.discount)) });
+      return json(410, { error: 'The referral program is temporarily unavailable while it is being upgraded.' });
     }
 
     if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
@@ -602,8 +533,8 @@ export async function handler(event) {
         p_items: items,
         p_payment_method: 'etransfer',
         p_promo_code: body.promo_code || null,
-        p_referral_code: body.referral_code || null,
-        p_referral_reward_code: body.referral_reward_code || null,
+        p_referral_code: null,
+        p_referral_reward_code: null,
       });
       if (error) {
         const code = String(error.message || '');
