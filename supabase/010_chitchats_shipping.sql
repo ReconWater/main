@@ -197,9 +197,10 @@ BEGIN
     WHERE public.recon_is_shipping_variant((x.item->>'variant_id')::uuid)
   ) INTO v_recon;
 
-  -- Preserve every non-Recon-Water shipping rule in the shared database.
+  -- This wrapper is only for Recon Water checkout. Non-Recon orders continue
+  -- through the existing create_order_v3/v4/v5 path and never call this function.
   IF NOT v_recon THEN
-    RETURN public.mbl_calculate_shipping(p_market,p_shipping_total*0 + 0,p_items); -- replaced below by patched caller fallback
+    RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='INVALID_ITEMS';
   END IF;
 
   -- Chit Chats is not used for this product cross-border. Remove the legacy flat rate instead of silently charging it.
@@ -218,7 +219,6 @@ BEGIN
      OR v_quote.items_fingerprint<>public.recon_shipping_items_fingerprint(p_items)
      OR p_shipping_total IS NULL OR round(p_shipping_total,2)<>round(v_quote.amount,2)
   THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='SHIPPING_CHANGED'; END IF;
-  UPDATE public.shipping_quotes SET consumed_at=now() WHERE id=v_quote.id;
   RETURN round(v_quote.amount,2);
 END
 $fn$;
@@ -244,11 +244,27 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path=public
 AS $fn$
-DECLARE v_result jsonb; v_order public.orders%rowtype; v_ref public.referral_codes%rowtype; v_reward public.referral_rewards%rowtype; v_discount numeric(12,2):=0; v_quote public.shipping_quotes%rowtype;
+DECLARE v_result jsonb; v_order public.orders%rowtype; v_ref public.referral_codes%rowtype; v_reward public.referral_rewards%rowtype; v_discount numeric(12,2):=0; v_quote public.shipping_quotes%rowtype; v_verified_shipping numeric(12,2); v_quote_id uuid;
 BEGIN
-  v_result:=public.create_order_v5(p_idempotency_key,p_customer_name,p_customer_email,p_shipping_address,p_market,p_currency,p_shipping_total,p_items,p_payment_method,NULL,NULL,p_promo_code);
+  -- Validate and lock the live quote before entering the existing checkout chain.
+  -- The transaction-local setting lets mbl_calculate_shipping() recognize this trusted
+  -- Recon Water checkout without changing create_order_v3/v4/v5 signatures.
+  v_verified_shipping:=public.recon_resolve_checkout_shipping(p_shipping_address,p_market,p_shipping_total,p_items);
+  BEGIN
+    v_quote_id:=nullif(btrim(coalesce(p_shipping_address->>'shipping_quote_id','')),'')::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='SHIPPING_QUOTE_REQUIRED';
+  END;
+  PERFORM set_config('recon.shipping_quote_id',v_quote_id::text,true);
+
+  v_result:=public.create_order_v5(p_idempotency_key,p_customer_name,p_customer_email,p_shipping_address,p_market,p_currency,v_verified_shipping,p_items,p_payment_method,NULL,NULL,p_promo_code);
   SELECT * INTO v_order FROM public.orders WHERE id=(v_result->>'order_id')::uuid FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='P0002',MESSAGE='ORDER_NOT_FOUND'; END IF;
+
+  UPDATE public.shipping_quotes
+  SET consumed_at=now()
+  WHERE id=v_quote_id AND consumed_at IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='SHIPPING_QUOTE_EXPIRED'; END IF;
 
   IF nullif(btrim(coalesce(p_referral_code,'')),'') IS NOT NULL THEN
     SELECT * INTO v_ref FROM public.referral_codes WHERE upper(code)=upper(btrim(p_referral_code)) AND coalesce(active,true) LIMIT 1;
@@ -280,7 +296,7 @@ BEGIN
   END IF;
 
   BEGIN
-    SELECT * INTO v_quote FROM public.shipping_quotes WHERE id=(p_shipping_address->>'shipping_quote_id')::uuid;
+    SELECT * INTO v_quote FROM public.shipping_quotes WHERE id=v_quote_id;
     IF FOUND THEN
       UPDATE public.orders SET shipping_provider=v_quote.provider,shipping_service_code=v_quote.service_code,shipping_service_name=v_quote.service_name,
         shipping_estimate=v_quote.estimate,shipping_quote_id=v_quote.id,shipping_quote_at=v_quote.created_at,
@@ -299,22 +315,103 @@ $fn$;
 
 REVOKE ALL ON FUNCTION public.recon_store_shipping_quote(jsonb,public.market_code,jsonb,text,text,numeric,text,text,jsonb,integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.recon_store_shipping_quote(jsonb,public.market_code,jsonb,text,text,numeric,text,text,jsonb,integer) TO service_role;
+REVOKE ALL ON FUNCTION public.recon_resolve_checkout_shipping(jsonb,public.market_code,numeric,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.recon_resolve_checkout_shipping(jsonb,public.market_code,numeric,jsonb) TO service_role;
 REVOKE ALL ON FUNCTION public.recon_create_order_v1(uuid,text,text,jsonb,public.market_code,character,numeric,jsonb,text,text,text,text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.recon_create_order_v1(uuid,text,text,jsonb,public.market_code,character,numeric,jsonb,text,text,text,text) TO service_role;
 
--- Patch only the one create_order_v3 shipping assignment. The replacement preserves legacy shipping for every
--- non-Recon product and requires a live quote only for the Recon Water variants.
-DO $patch$
-DECLARE v_oid oid:=to_regprocedure('public.create_order_v3(uuid,text,text,jsonb,public.market_code,character,numeric,jsonb,text,uuid,text)'); v_before text; v_after text; v_matches integer;
+-- Preserve the exact pre-Chit-Chats shipping implementation once, then wrap the
+-- existing helper. This avoids modifying create_order_v3/v4/v5 and therefore remains
+-- compatible with formatting or implementation changes inside those checkout functions.
+DO $backup_shipping$
+DECLARE
+  v_source_oid oid:=to_regprocedure('public.mbl_calculate_shipping(public.market_code,numeric,jsonb)');
+  v_backup_oid oid:=to_regprocedure('public.recon_mbl_calculate_shipping_before_chitchats_20261025(public.market_code,numeric,jsonb)');
+  v_def text;
+  v_copy text;
 BEGIN
-  SELECT pg_get_functiondef(v_oid) INTO v_before;
-  SELECT count(*) INTO v_matches FROM regexp_matches(v_before,'v_shipping[[:space:]]*:=[[:space:]]*public[.]mbl_calculate_shipping[[:space:]]*[(][[:space:]]*p_market[[:space:]]*,[[:space:]]*v_subtotal[[:space:]]*,[[:space:]]*p_items[[:space:]]*[)][[:space:]]*;','gi');
-  IF v_matches<>1 THEN RAISE EXCEPTION 'RECON_CHITCHATS_PATCH_ABORT: expected one create_order_v3 shipping assignment, found %',v_matches; END IF;
-  v_after:=regexp_replace(v_before,'v_shipping[[:space:]]*:=[[:space:]]*public[.]mbl_calculate_shipping[[:space:]]*[(][[:space:]]*p_market[[:space:]]*,[[:space:]]*v_subtotal[[:space:]]*,[[:space:]]*p_items[[:space:]]*[)][[:space:]]*;',
-    E'IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) z(item) WHERE public.recon_is_shipping_variant((z.item->>''variant_id'')::uuid)) THEN\n  v_shipping:=public.recon_resolve_checkout_shipping(p_shipping_address,p_market,p_shipping_total,p_items);\n ELSE\n  v_shipping:=public.mbl_calculate_shipping(p_market,v_subtotal,p_items);\n END IF;', 'i');
-  IF v_after=v_before THEN RAISE EXCEPTION 'RECON_CHITCHATS_PATCH_ABORT: function definition unchanged'; END IF;
-  EXECUTE v_after;
+  IF v_source_oid IS NULL THEN
+    RAISE EXCEPTION 'RECON_CHITCHATS_PATCH_ABORT: public.mbl_calculate_shipping(market_code,numeric,jsonb) was not found';
+  END IF;
+
+  IF v_backup_oid IS NULL THEN
+    SELECT pg_get_functiondef(v_source_oid) INTO v_def;
+    v_copy:=regexp_replace(
+      v_def,
+      'CREATE OR REPLACE FUNCTION[[:space:]]+public[.]mbl_calculate_shipping[[:space:]]*[(]',
+      'CREATE OR REPLACE FUNCTION public.recon_mbl_calculate_shipping_before_chitchats_20261025(',
+      'i'
+    );
+    IF v_copy=v_def THEN
+      RAISE EXCEPTION 'RECON_CHITCHATS_PATCH_ABORT: could not clone the current shipping helper safely';
+    END IF;
+    EXECUTE v_copy;
+  END IF;
 END
-$patch$;
+$backup_shipping$;
+
+REVOKE ALL ON FUNCTION public.recon_mbl_calculate_shipping_before_chitchats_20261025(public.market_code,numeric,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.recon_mbl_calculate_shipping_before_chitchats_20261025(public.market_code,numeric,jsonb) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.mbl_calculate_shipping(
+  p_market public.market_code,
+  p_subtotal numeric,
+  p_items jsonb
+)
+RETURNS numeric
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public','extensions','pg_temp'
+AS $fn$
+DECLARE
+  v_quote_id uuid;
+  v_quote public.shipping_quotes%rowtype;
+  v_has_recon boolean:=false;
+BEGIN
+  SELECT EXISTS(
+    SELECT 1
+    FROM jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) x(item)
+    WHERE public.recon_is_shipping_variant((x.item->>'variant_id')::uuid)
+  ) INTO v_has_recon;
+
+  IF NOT v_has_recon THEN
+    RETURN public.recon_mbl_calculate_shipping_before_chitchats_20261025(p_market,p_subtotal,p_items);
+  END IF;
+
+  -- Recon Water no longer uses any legacy flat-rate branch.
+  IF p_market<>'domestic'::public.market_code THEN
+    RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='INTERNATIONAL_SHIPPING_UNAVAILABLE';
+  END IF;
+
+  BEGIN
+    v_quote_id:=nullif(current_setting('recon.shipping_quote_id',true),'')::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    v_quote_id:=NULL;
+  END;
+  IF v_quote_id IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='SHIPPING_QUOTE_REQUIRED';
+  END IF;
+
+  SELECT * INTO v_quote
+  FROM public.shipping_quotes
+  WHERE id=v_quote_id;
+
+  IF NOT FOUND
+     OR v_quote.consumed_at IS NOT NULL
+     OR v_quote.expires_at<=now()
+     OR v_quote.market<>p_market
+     OR upper(btrim(v_quote.currency::text))<>'CAD'
+     OR v_quote.items_fingerprint<>public.recon_shipping_items_fingerprint(p_items)
+  THEN
+    RAISE EXCEPTION USING ERRCODE='P0001',MESSAGE='SHIPPING_QUOTE_EXPIRED';
+  END IF;
+
+  RETURN round(v_quote.amount,2);
+END
+$fn$;
+
+COMMENT ON FUNCTION public.mbl_calculate_shipping(public.market_code,numeric,jsonb)
+IS 'Shared shipping resolver. Recon Water bacteriostatic-water variants require a transaction-scoped live Chit Chats quote; all other products delegate to the preserved pre-Chit-Chats helper.';
 
 COMMIT;
