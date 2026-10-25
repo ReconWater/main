@@ -422,12 +422,12 @@ export async function handler(event) {
       const admin = await requireShippingAdmin(event, db);
       const requestedMode = String(body.mode || '').trim().toLowerCase();
       if (!['chitchats','flat_25'].includes(requestedMode)) return json(400, { error: 'Invalid shipping mode.' });
-      const value = { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD, updated_by: admin.id, updated_at: new Date().toISOString() };
-      const { error } = await db.from('app_settings').upsert({ key: 'recon_shipping_mode', value, public_read: false, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      const { data, error } = await db.rpc('recon_save_shipping_mode', {
+        p_mode: requestedMode, p_actor: admin.id,
+      });
       if (error) throw error;
-      const { error: expireError } = await db.from('shipping_quotes').update({ expires_at: new Date().toISOString() }).is('consumed_at', null).gt('expires_at', new Date().toISOString());
-      if (expireError) throw expireError;
-      return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
+      return json(200, data);
+
     }
 
     if (event.httpMethod === 'POST' && mode === 'inventory-receive') {
