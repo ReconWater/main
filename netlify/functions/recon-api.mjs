@@ -192,6 +192,7 @@ export async function handler(event) {
 
       const subtotalCents = Number(pack.price_cents);
       const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotalCents) : null;
+      if (promoCode && !promoResult) return json(409, { error: 'Promo code is invalid or unavailable. Review your total before submitting.' });
       let promoClaimed = false;
       if (promoResult) {
         const currentUses = Number(promoResult.promo.uses_count || 0);

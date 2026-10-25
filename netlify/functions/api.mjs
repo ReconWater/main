@@ -105,7 +105,9 @@ export default async request => {
 
     if(action==='submit-order') {
       const secureSubtotal=await secureDomesticSubtotal(db,body.items);
-      const promoResult=body.promo_code?await validatePromo(db,body.promo_code,secureSubtotal):null;
+      const promoCode=String(body.promo_code||'').trim();
+      const promoResult=promoCode?await validatePromo(db,promoCode,secureSubtotal):null;
+      if(promoCode&&!promoResult) return reply({error:'Promo code is invalid or unavailable. Review your total before submitting.'},409);
       if(promoResult){
         const currentUses=Number(promoResult.promo.uses_count||0);
         const {data:claimed,error:claimError}=await db.from('promo_codes')
