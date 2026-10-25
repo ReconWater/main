@@ -39,9 +39,32 @@ async function getReconShippingMode(db) {
 }
 
 function isMissingRelation(error) {
-  const code = String(error?.code || '');
+  const code = String(error?.code || '').trim().toUpperCase();
   const message = String(error?.message || '');
-  return code === '42P01' || code === 'PGRST205' || /does not exist|schema cache|could not find the table/i.test(message);
+  // PGRST205 is specifically a missing-table/object error. PGRST204 is a
+  // missing-column error and MUST NOT be treated as "table not installed".
+  // The previous generic /schema cache/ match caused exactly that false state.
+  return code === '42P01' || code === 'PGRST205' || /relation .* does not exist|could not find the table/i.test(message);
+}
+
+function batchSchemaError(error, objectName) {
+  const code = String(error?.code || '').trim().toUpperCase();
+  const message = String(error?.message || 'Unknown database error.');
+  const hint = String(error?.hint || '').trim();
+  const details = String(error?.details || '').trim();
+  return {
+    object: objectName,
+    code: code || null,
+    message,
+    details: details || null,
+    hint: hint || null,
+  };
+}
+
+function isSchemaShapeError(error) {
+  const code = String(error?.code || '').trim().toUpperCase();
+  const message = String(error?.message || '');
+  return code === 'PGRST204' || code === '42703' || /could not find the .* column|column .* does not exist/i.test(message);
 }
 
 async function requireReconAdmin(event, db, allowedProfileRoles = null) {
@@ -94,22 +117,46 @@ async function requireInventoryAdmin(event, db) {
 }
 
 async function loadBatchState(db, productId, includeMovements = false) {
-  const { data: config, error: configError } = await db.from('recon_inventory_config').select('*').eq('product_id', productId).maybeSingle();
+  const { data: config, error: configError } = await db.from('recon_inventory_config')
+    .select('product_id,enabled,case_size,activated_at,activated_by,updated_at')
+    .eq('product_id', productId)
+    .maybeSingle();
   if (configError) {
-    if (isMissingRelation(configError)) return { installed: false, enabled: false, lots: [], movements: [] };
+    if (isMissingRelation(configError)) {
+      return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(configError, 'recon_inventory_config') };
+    }
+    if (isSchemaShapeError(configError)) {
+      return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(configError, 'recon_inventory_config') };
+    }
     throw configError;
   }
+
   const { data: lots, error: lotsError } = await db.from('recon_inventory_lots')
-    .select('*').eq('product_id', productId).order('expiry_date', { ascending: true }).order('created_at', { ascending: true });
-  if (lotsError) throw lotsError;
+    .select('id,product_id,lot_code,expiry_date,supplier_reference,location,status,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved,created_by,updated_by,created_at,updated_at')
+    .eq('product_id', productId)
+    .order('expiry_date', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+  if (lotsError) {
+    if (isMissingRelation(lotsError)) return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(lotsError, 'recon_inventory_lots') };
+    if (isSchemaShapeError(lotsError)) return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(lotsError, 'recon_inventory_lots') };
+    throw lotsError;
+  }
+
   let movements = [];
   if (includeMovements) {
     const { data, error } = await db.from('recon_inventory_lot_movements')
-      .select('*').eq('product_id', productId).order('created_at', { ascending: false }).limit(120);
-    if (error) throw error;
+      .select('id,lot_id,product_id,movement_type,loose_on_hand_delta,loose_reserved_delta,sealed_on_hand_delta,sealed_reserved_delta,reference_type,reference_id,note,performed_by,created_at')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false })
+      .limit(120);
+    if (error) {
+      if (isMissingRelation(error)) return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(error, 'recon_inventory_lot_movements') };
+      if (isSchemaShapeError(error)) return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(error, 'recon_inventory_lot_movements') };
+      throw error;
+    }
     movements = data || [];
   }
-  return { installed: true, enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
+  return { installed: true, schema_status: 'ready', enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
 }
 
 function batchSummary(lots = []) {
@@ -162,9 +209,12 @@ async function findReconProduct(db) {
       if (error) throw error;
       if (data) return data;
     }
-  } else if (configError && !isMissingRelation(configError)) {
+  } else if (configError && !isMissingRelation(configError) && !isSchemaShapeError(configError)) {
     throw configError;
   }
+  // A partially-installed batch table can exist with an older column shape. In
+  // that case, continue with product discovery so inventory-admin can return a
+  // precise schema_mismatch diagnostic instead of failing before the check.
 
   // Schema-tolerant fallback for a fresh install before the batch config row is
   // created. Read existing columns only; never require products.slug.
@@ -338,6 +388,8 @@ export async function handler(event) {
       if (!batch.installed) {
         return json(200, {
           installed: false,
+          schema_status: batch.schema_status || 'unknown',
+          schema_error: batch.schema_error || null,
           enabled: false,
           product,
           config: null,
@@ -348,15 +400,14 @@ export async function handler(event) {
           packageAvailability: {},
           diagnostics: {
             ...database,
-            missing_relation: 'public.recon_inventory_config',
-            installer: 'supabase/012_batch_inventory_REPAIR_INSTALL.sql'
+            installer: 'supabase/013_repair_batch_inventory_schema.sql'
           }
         });
       }
       const catalogue = await loadCatalogue(db, true);
       const summary = batchSummary(batch.lots);
       const packageAvailability = Object.fromEntries((catalogue.packages || []).map(p => [p.id, p.available_packs]));
-      return json(200, { installed: true, product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability, diagnostics: database });
+      return json(200, { installed: true, schema_status: 'ready', product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability, diagnostics: database });
     }
 
     let body = {};
