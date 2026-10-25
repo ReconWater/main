@@ -39,6 +39,59 @@ async function requireShippingAdmin(event, db) {
   return authData.user;
 }
 
+async function requireInventoryAdmin(event, db) {
+  const header = String(event.headers?.authorization || event.headers?.Authorization || '');
+  const token = header.replace(/^Bearer\s+/i, '').trim();
+  if (!token) throw Object.assign(new Error('Administrator authentication required.'), { statusCode: 401 });
+  const { data: authData, error: authError } = await db.auth.getUser(token);
+  if (authError || !authData?.user?.id) throw Object.assign(new Error('Administrator session is invalid or expired.'), { statusCode: 401 });
+  const { data: profile, error } = await db.from('profiles').select('id,role,active').eq('id', authData.user.id).maybeSingle();
+  if (error) throw error;
+  const role = String(profile?.role || '').toLowerCase();
+  if (!profile?.active || !['owner','admin','fulfillment'].includes(role)) throw Object.assign(new Error('Inventory permission required.'), { statusCode: 403 });
+  return authData.user;
+}
+
+function isMissingRelation(error) {
+  return String(error?.code || '') === '42P01' || /does not exist/i.test(String(error?.message || ''));
+}
+
+async function loadBatchState(db, productId, includeMovements = false) {
+  const { data: config, error: configError } = await db.from('recon_inventory_config').select('*').eq('product_id', productId).maybeSingle();
+  if (configError) {
+    if (isMissingRelation(configError)) return { installed: false, enabled: false, lots: [], movements: [] };
+    throw configError;
+  }
+  const { data: lots, error: lotsError } = await db.from('recon_inventory_lots')
+    .select('*').eq('product_id', productId).order('expiry_date', { ascending: true }).order('created_at', { ascending: true });
+  if (lotsError) throw lotsError;
+  let movements = [];
+  if (includeMovements) {
+    const { data, error } = await db.from('recon_inventory_lot_movements')
+      .select('*').eq('product_id', productId).order('created_at', { ascending: false }).limit(120);
+    if (error) throw error;
+    movements = data || [];
+  }
+  return { installed: true, enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
+}
+
+function batchSummary(lots = []) {
+  const today = new Date().toISOString().slice(0,10);
+  let looseOnHand=0,looseReserved=0,looseAvailable=0,sealedOnHand=0,sealedReserved=0,sealedAvailable=0;
+  for (const lot of lots) {
+    looseOnHand += Number(lot.loose_on_hand || 0);
+    looseReserved += Number(lot.loose_reserved || 0);
+    sealedOnHand += Number(lot.sealed_on_hand || 0);
+    sealedReserved += Number(lot.sealed_reserved || 0);
+    const eligible = lot.status === 'available' && lot.expiry_date && lot.expiry_date >= today;
+    if (eligible) {
+      looseAvailable += Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0));
+      sealedAvailable += Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0));
+    }
+  }
+  return { loose_on_hand:looseOnHand,loose_reserved:looseReserved,loose_available:looseAvailable,sealed_on_hand:sealedOnHand,sealed_reserved:sealedReserved,sealed_available:sealedAvailable,total_vial_equivalent:looseOnHand+(sealedOnHand*25),available_vial_equivalent:looseAvailable+(sealedAvailable*25) };
+}
+
 async function findReconProduct(db) {
   const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim();
   if (configuredSlug) {
@@ -73,6 +126,8 @@ function packageLabel(variant) {
 
 async function loadCatalogue(db, includeInactive = false) {
   const product = await findReconProduct(db);
+  const batch = await loadBatchState(db, product.id, false);
+  const summary = batchSummary(batch.lots);
   let q = db.from('product_variants')
     .select('id,product_id,market,sku,strength,package_type,package_quantity,currency,price,active,metadata,fulfillment_policy,inventory_pool_variant_id,updated_at')
     .eq('product_id', product.id)
@@ -92,8 +147,10 @@ async function loadCatalogue(db, includeInactive = false) {
     const row = inv.get(sourceId);
     const free = row ? Math.max(0, Number(row.on_hand || 0) - Number(row.reserved || 0)) : 0;
     const packQty = Math.max(1, Number(v.package_quantity || 1));
+    const stockKind = String(v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose';
     const sharedPool = !!v.inventory_pool_variant_id && v.inventory_pool_variant_id !== v.id;
-    const available = v.fulfillment_policy === 'unlimited' ? 999999 : sharedPool ? Math.floor(free / packQty) : free;
+    const batchAvailable = stockKind === 'sealed' ? summary.sealed_available : Math.floor(summary.loose_available / packQty);
+    const legacyAvailable = v.fulfillment_policy === 'unlimited' ? 999999 : sharedPool ? Math.floor(free / packQty) : free;
     return {
       id: v.id,
       product_id: v.product_id,
@@ -101,18 +158,18 @@ async function loadCatalogue(db, includeInactive = false) {
       sku: v.sku,
       label: packageLabel(v),
       vials_per_pack: packQty,
-      stock_kind: String(v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose',
+      stock_kind: stockKind,
       price_cents: cents(v.price),
       active: !!v.active,
       max_per_request: 100,
-      available_packs: available,
+      available_packs: batch.enabled ? batchAvailable : legacyAvailable,
       currency: String(v.currency || 'CAD').trim(),
       fulfillment_policy: v.fulfillment_policy,
       incoming_quantity: Number(row?.incoming_quantity || 0),
       incoming_eta: row?.incoming_eta || null,
     };
   });
-  return { product, packages, lots: [] };
+  return { product, packages, lots: batch.enabled ? batch.lots : [], batch_inventory: { installed: batch.installed, enabled: batch.enabled, summary } };
 }
 
 async function loadVariant(db, id, market = 'domestic') {
@@ -197,6 +254,17 @@ export async function handler(event) {
       return json(200, await getReconShippingMode(db));
     }
 
+    if (event.httpMethod === 'GET' && mode === 'inventory-admin') {
+      await requireInventoryAdmin(event, db);
+      const product = await findReconProduct(db);
+      const batch = await loadBatchState(db, product.id, true);
+      if (!batch.installed) return json(409, { error: 'Batch inventory is not installed. Run supabase/012_batch_state_inventory.sql.' });
+      const catalogue = await loadCatalogue(db, true);
+      const summary = batchSummary(batch.lots);
+      const packageAvailability = Object.fromEntries((catalogue.packages || []).map(p => [p.id, p.available_packs]));
+      return json(200, { product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability });
+    }
+
     let body = {};
     if (event.httpMethod === 'POST') {
       try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request data.' }); }
@@ -213,6 +281,58 @@ export async function handler(event) {
       const { error: expireError } = await db.from('shipping_quotes').update({ expires_at: new Date().toISOString() }).is('consumed_at', null).gt('expires_at', new Date().toISOString());
       if (expireError) throw expireError;
       return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'inventory-receive') {
+      const admin = await requireInventoryAdmin(event, db);
+      const product = await findReconProduct(db);
+      const { data, error } = await db.rpc('recon_receive_inventory_lot', {
+        p_product_id: product.id,
+        p_lot_code: String(body.lot_code || ''),
+        p_expiry: body.expiry_date || null,
+        p_supplier: String(body.supplier_reference || ''),
+        p_location: String(body.location || ''),
+        p_loose: Number(body.loose_count || 0),
+        p_sealed: Number(body.sealed_count || 0),
+        p_actor: admin.id,
+      });
+      if (error) throw error;
+      return json(200, { id: data });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'inventory-update-lot') {
+      const admin = await requireInventoryAdmin(event, db);
+      const { error } = await db.rpc('recon_update_inventory_lot', {
+        p_lot_id: String(body.lot_id || ''), p_lot_code: String(body.lot_code || ''), p_expiry: body.expiry_date || null,
+        p_supplier: String(body.supplier_reference || ''), p_location: String(body.location || ''), p_status: String(body.status || ''), p_actor: admin.id,
+      });
+      if (error) throw error;
+      return json(200, { ok: true });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'inventory-adjust-lot') {
+      const admin = await requireInventoryAdmin(event, db);
+      const { error } = await db.rpc('recon_adjust_inventory_lot', {
+        p_lot_id: String(body.lot_id || ''), p_loose_delta: Number(body.loose_delta || 0), p_sealed_delta: Number(body.sealed_delta || 0),
+        p_reason: String(body.reason || ''), p_actor: admin.id,
+      });
+      if (error) throw error;
+      return json(200, { ok: true });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'inventory-open-case') {
+      const admin = await requireInventoryAdmin(event, db);
+      const { error } = await db.rpc('recon_open_inventory_case', { p_lot_id: String(body.lot_id || ''), p_actor: admin.id });
+      if (error) throw error;
+      return json(200, { ok: true });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'inventory-activate') {
+      const admin = await requireInventoryAdmin(event, db);
+      const product = await findReconProduct(db);
+      const { data, error } = await db.rpc('recon_activate_batch_inventory', { p_product_id: product.id, p_actor: admin.id });
+      if (error) throw error;
+      return json(200, { ok: true, inventory: data });
     }
 
     if (event.httpMethod === 'POST' && mode === 'promo-validate') {
@@ -307,6 +427,12 @@ export async function handler(event) {
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
       const name = String(body.name || '').trim();
       const email = String(body.email || '').trim();
+      const reconProduct = await findReconProduct(db);
+      const batch = await loadBatchState(db, reconProduct.id, false);
+      if (batch.enabled) {
+        const { error: syncError } = await db.rpc('recon_sync_variant_inventory', { p_product_id: reconProduct.id });
+        if (syncError) throw syncError;
+      }
       const variant = await loadVariant(db, String(body.package_id || ''));
       if (!variant) return json(409, { error: 'Selected package is unavailable.' });
       if (name.length < 2 || !email.includes('@')) return json(400, { error: 'Enter valid customer details.' });

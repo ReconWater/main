@@ -350,3 +350,12 @@
 .shipping-mode-notes strong{font:800 11px Manrope,Arial,sans-serif;color:#244a59}
 .shipping-mode-notes span{font-size:10px;line-height:1.6;color:#71858e}
 @media(max-width:700px){.shipping-mode-notes{grid-template-columns:1fr}.shipping-killswitch-toggle{align-items:flex-start}.shipping-killswitch-toggle>i{margin-top:2px}.shipping-mode-copy strong{font-size:18px}}
+
+/* Recon Water batch-state inventory */
+.batch-activation-card{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:22px;margin-bottom:14px;border-color:#d9e6ea;background:linear-gradient(145deg,#fbfdfe,#f3f9fb)}
+.batch-activation-card>div{max-width:760px}.batch-activation-card h3{margin:5px 0 6px;font:800 18px/1.25 Manrope,Arial,sans-serif;color:#183f4e}.batch-activation-card p{margin:0;color:#6a808a;font-size:11px;line-height:1.65}
+.batch-authoritative{display:flex;align-items:flex-start;gap:11px;margin-bottom:14px;padding:13px 15px;border:1px solid #cce5db;border-radius:12px;background:#f2fbf7;color:#236a52}.batch-authoritative svg{flex:0 0 auto;margin-top:1px}.batch-authoritative>div{display:flex;flex-direction:column;gap:2px}.batch-authoritative strong{font:800 11px Manrope,Arial,sans-serif}.batch-authoritative span{font-size:10px;line-height:1.5;color:#5d7d70}
+.inventory-state-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}
+.batch-movement-list{display:grid}.batch-movement-list>div{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 17px;border-top:1px solid #edf2f4}.batch-movement-list>div:first-child{border-top:0}.batch-movement-list>div>div{display:flex;flex-direction:column;gap:2px}.batch-movement-list strong{text-transform:capitalize;font:800 11px Manrope,Arial,sans-serif;color:#284b59}.batch-movement-list small{font-size:9px;color:#83949b}.batch-movement-list>div>span{font-size:10px;font-weight:700;color:#52707b;text-align:right}
+@media(max-width:1000px){.inventory-state-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.batch-activation-card{align-items:flex-start;flex-direction:column}}
+@media(max-width:600px){.inventory-state-metrics{grid-template-columns:1fr}.batch-activation-card .primary-button{width:100%}.batch-movement-list>div{align-items:flex-start;flex-direction:column;gap:5px}.batch-movement-list>div>span{text-align:left}}
