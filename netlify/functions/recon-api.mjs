@@ -19,6 +19,18 @@ const validCode = value => /^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(normalizeCode(value
 const cents = value => Math.round(Number(value || 0) * 100);
 const FLAT_CANADA_RATE_CAD = 25;
 
+function supabaseProjectIdentity() {
+  const raw = String(process.env.SUPABASE_URL || '').trim();
+  try {
+    const url = new URL(raw);
+    const host = url.hostname || '';
+    const projectRef = host.endsWith('.supabase.co') ? host.split('.')[0] : host;
+    return { project_ref: projectRef || null, host: host || null };
+  } catch {
+    return { project_ref: null, host: null };
+  }
+}
+
 async function getReconShippingMode(db) {
   const { data, error } = await db.from('app_settings').select('value').eq('key', 'recon_shipping_mode').maybeSingle();
   if (error) throw error;
@@ -322,11 +334,29 @@ export async function handler(event) {
       await requireInventoryAdmin(event, db);
       const product = await findReconProduct(db);
       const batch = await loadBatchState(db, product.id, true);
-      if (!batch.installed) return json(409, { error: 'Batch inventory is not installed. Run supabase/012_batch_state_inventory.sql.' });
+      const database = supabaseProjectIdentity();
+      if (!batch.installed) {
+        return json(200, {
+          installed: false,
+          enabled: false,
+          product,
+          config: null,
+          lots: [],
+          movements: [],
+          summary: null,
+          packages: [],
+          packageAvailability: {},
+          diagnostics: {
+            ...database,
+            missing_relation: 'public.recon_inventory_config',
+            installer: 'supabase/012_batch_inventory_REPAIR_INSTALL.sql'
+          }
+        });
+      }
       const catalogue = await loadCatalogue(db, true);
       const summary = batchSummary(batch.lots);
       const packageAvailability = Object.fromEntries((catalogue.packages || []).map(p => [p.id, p.available_packs]));
-      return json(200, { product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability });
+      return json(200, { installed: true, product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability, diagnostics: database });
     }
 
     let body = {};
