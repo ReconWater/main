@@ -32,11 +32,30 @@ function Icon({ name, size = 20 }) {
 function InternationalOrders() {
   const [qty, setQty] = useState(1);
   const [form, setForm] = useState({ name: '', email: '', address: '', city: '', region: '', postal: '', country: '', notes: '' });
+  const [referralInput, setReferralInput] = useState('');
+  const [referral, setReferral] = useState(null);
+  const [referralStatus, setReferralStatus] = useState({ busy: false, message: '', error: false });
   const [status, setStatus] = useState({ busy: false, message: '', ok: false });
 
   const productSubtotal = qty * 20;
   const orderTotal = productSubtotal + 30;
-  const patch = (key, value) => setForm(current => ({ ...current, [key]: value }));
+  const patch = (key, value) => {
+    setForm(current => ({ ...current, [key]: value }));
+    if (key === 'email' && referral) { setReferral(null); setReferralStatus({ busy: false, message: 'Reapply the referral code after changing your email.', error: false }); }
+  };
+
+  async function applyReferral(event) {
+    event.preventDefault();
+    if (!referralInput.trim()) return;
+    if (!form.email.trim()) { setReferralStatus({ busy: false, message: 'Enter your email before applying a referral code.', error: true }); return; }
+    setReferralStatus({ busy: true, message: '', error: false });
+    try {
+      const result = await apiRequest('referral-validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ purpose: 'attribution', code: referralInput, email: form.email }) });
+      setReferral(result);setReferralInput(result.code);setReferralStatus({ busy: false, message: 'Referral recognized. Your referrer earns a reward after fulfillment.', error: false });
+    } catch (error) {
+      setReferral(null);setReferralStatus({ busy: false, message: error.message || 'Referral code could not be applied.', error: true });
+    }
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -58,6 +77,7 @@ function InternationalOrders() {
             country: form.country,
           },
           notes: form.notes,
+          referral_code: referral?.code || null,
         }),
       });
       setStatus({ busy: false, ok: true, message: `Request ${data.order_number || ''} received. USDC payment is requested only after the order is reviewed and approved.` });
@@ -94,6 +114,7 @@ function InternationalOrders() {
           <div className="international-card-head"><div><span>INTERNATIONAL REQUEST</span><h2>Bacteriostatic Water · 30 mL</h2></div><Icon name="truck" size={22}/></div>
           <div className="intl-qty-row"><div><span>Quantity</span><small>Maximum 5 vials</small></div><div className="intl-stepper"><button type="button" onClick={()=>setQty(q=>Math.max(1,q-1))} aria-label="Decrease international quantity">−</button><strong>{qty}</strong><button type="button" onClick={()=>setQty(q=>Math.min(5,q+1))} aria-label="Increase international quantity">+</button></div></div>
           <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(productSubtotal)} USD</strong></div><div><span>Flat delivery</span><strong>$30.00 USD</strong></div><div className="intl-total-row"><span>Order total</span><strong>${money(orderTotal)} USD</strong></div></div><div className="intl-payment-rail"><div><span>PAYMENT METHOD</span><strong>USDC · Ethereum</strong></div><p>Payment is requested only after review. Send USDC on Ethereum mainnet (ERC-20) only; the wallet address and exact amount are provided with the approved order.</p></div>
+          <div className="intl-referral-box"><div><span>REFERRED BY SOMEONE?</span><p>Enter their referral code. International pricing does not change; the referrer receives a one-time 5% Canadian-store reward code after your order is fulfilled.</p></div><form onSubmit={applyReferral}><input value={referralInput} onChange={e=>setReferralInput(e.target.value.toUpperCase())} placeholder="Referral code" maxLength="32"/><button type="submit" disabled={referralStatus.busy||!referralInput.trim()}>{referralStatus.busy?'Checking…':referral?'Applied':'Apply'}</button></form>{referralStatus.message&&<small className={referralStatus.error?'error':'ok'}>{referralStatus.message}</small>}</div>
           <div className="intl-form-grid">
             <label><span>Name</span><input required minLength="2" maxLength="100" autoComplete="name" value={form.name} onChange={e=>patch('name',e.target.value)}/></label>
             <label><span>Email</span><input required type="email" autoComplete="email" value={form.email} onChange={e=>patch('email',e.target.value)}/></label>

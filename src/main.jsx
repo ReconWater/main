@@ -54,6 +54,12 @@ function Storefront() {
   const [promoInput, setPromoInput] = useState('');
   const [promo, setPromo] = useState(null);
   const [promoState, setPromoState] = useState({ busy: false, message: '', error: false });
+  const [referralInput, setReferralInput] = useState('');
+  const [referral, setReferral] = useState(null);
+  const [referralState, setReferralState] = useState({ busy: false, message: '', error: false });
+  const [rewardInput, setRewardInput] = useState('');
+  const [reward, setReward] = useState(null);
+  const [rewardState, setRewardState] = useState({ busy: false, message: '', error: false });
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', address: '', city: '', region: 'ON', postal: '', notes: '' });
   const [checkoutState, setCheckoutState] = useState({ busy: false, ok: false, message: '', orderNumber: '' });
@@ -108,11 +114,15 @@ function Storefront() {
     setPromo(null);
     setPromoInput('');
     setPromoState({ busy: false, message: '', error: false });
+    setReferral(null);setReferralInput('');setReferralState({ busy: false, message: '', error: false });
+    setReward(null);setRewardInput('');setRewardState({ busy: false, message: '', error: false });
     setCartOpen(true);
   };
   const cartSubtotalCents = cart ? Math.round(Number(cart.price) * 100) : 0;
   const cartDiscountCents = promo ? Number(promo.discount_cents || 0) : 0;
-  const cartTotalCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
+  const cartAfterPromoCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
+  const cartRewardDiscountCents = reward ? Math.min(cartAfterPromoCents, Math.floor(cartAfterPromoCents * 0.05)) : 0;
+  const cartTotalCents = Math.max(0, cartAfterPromoCents - cartRewardDiscountCents);
   async function applyPromo(event) {
     event.preventDefault();
     if (!cart || !promoInput.trim()) return;
@@ -125,6 +135,7 @@ function Storefront() {
       });
       setPromo(result);
       setPromoInput(result.code);
+      setReward(null);setRewardState({ busy: false, message: reward ? 'Reapply your referral reward after changing the promo code.' : '', error: false });
       setPromoState({ busy: false, message: `${result.code} applied`, error: false });
     } catch (error) {
       setPromo(null);
@@ -135,8 +146,41 @@ function Storefront() {
     setPromo(null);
     setPromoInput('');
     setPromoState({ busy: false, message: '', error: false });
+    if (reward) { setReward(null); setRewardState({ busy: false, message: 'Reapply your referral reward after changing the promo code.', error: false }); }
   }
-  const patchCheckout = (key, value) => setCheckoutForm(current => ({ ...current, [key]: value }));
+  async function applyReferral(event) {
+    event.preventDefault();
+    if (!referralInput.trim()) return;
+    if (!checkoutForm.email.trim()) { setReferralState({ busy: false, message: 'Enter your checkout email before applying a referral code.', error: true }); return; }
+    setReferralState({ busy: true, message: '', error: false });
+    try {
+      const result = await apiRequest('referral-validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ purpose: 'attribution', code: referralInput, email: checkoutForm.email }) });
+      setReferral(result);setReferralInput(result.code);setReferralState({ busy: false, message: 'Referral recognized. Your referrer will earn a reward after fulfillment.', error: false });
+    } catch (error) {
+      setReferral(null);setReferralState({ busy: false, message: error.message || 'Referral code could not be applied.', error: true });
+    }
+  }
+  function removeReferral() { setReferral(null);setReferralInput('');setReferralState({ busy: false, message: '', error: false }); }
+  async function applyReward(event) {
+    event.preventDefault();
+    if (!cart || !rewardInput.trim()) return;
+    if (!checkoutForm.email.trim()) { setRewardState({ busy: false, message: 'Enter your checkout email before applying a referral reward.', error: true }); return; }
+    setRewardState({ busy: true, message: '', error: false });
+    try {
+      const result = await apiRequest('referral-validate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ purpose: 'reward', code: rewardInput, package_id: cart.id, promo_code: promo?.code || null, email: checkoutForm.email }) });
+      setReward(result);setRewardInput(result.code);setRewardState({ busy: false, message: `${result.code} reward applied · 5% off`, error: false });
+    } catch (error) {
+      setReward(null);setRewardState({ busy: false, message: error.message || 'Referral reward could not be applied.', error: true });
+    }
+  }
+  function removeReward() { setReward(null);setRewardInput('');setRewardState({ busy: false, message: '', error: false }); }
+  const patchCheckout = (key, value) => {
+    setCheckoutForm(current => ({ ...current, [key]: value }));
+    if (key === 'email') {
+      if (reward) { setReward(null); setRewardState({ busy: false, message: 'Reapply the referral reward after changing your email.', error: false }); }
+      if (referral) { setReferral(null); setReferralState({ busy: false, message: 'Reapply the referral code after changing your email.', error: false }); }
+    }
+  };
   async function submitDomestic(event) {
     event.preventDefault();
     if (!cart) return;
@@ -150,6 +194,8 @@ function Storefront() {
           email: checkoutForm.email,
           package_id: cart.id,
           promo_code: promo?.code || null,
+          referral_code: referral?.code || null,
+          referral_reward_code: reward?.code || null,
           shipping: {
             address: checkoutForm.address,
             city: checkoutForm.city,
@@ -162,8 +208,9 @@ function Storefront() {
       });
       setCheckoutState({ busy: false, ok: true, message: 'Request received. Payment is not due until the order is reviewed and approved.', orderNumber: result.order_number || '' });
       setCart(null);
-      setPromo(null);
-      setPromoInput('');
+      setPromo(null);setPromoInput('');
+      setReferral(null);setReferralInput('');
+      setReward(null);setRewardInput('');
       setCartOpen(false);
     } catch (error) {
       setCheckoutState({ busy: false, ok: false, message: error.message || 'Could not submit request.', orderNumber: '' });
@@ -226,7 +273,30 @@ function Storefront() {
         <div className="cart-summary"><div><span>Product subtotal</span><b>${money(cartSubtotalCents/100)} CAD</b></div><p>Promo codes are applied at checkout so you can review the discounted price before submitting.</p></div><div className="cart-payment-preview"><span>PAYMENT AFTER APPROVAL</span><b>Interac e-Transfer</b><small>Exact payment instructions are provided only after the request is approved.</small></div><button className="checkout-button" onClick={()=>{setCheckoutState({busy:false,ok:false,message:'',orderNumber:''});setCheckoutOpen(true)}}>Continue to checkout <Icon name="chevron" size={17}/></button><p className="checkout-disclaimer">No payment is taken when you submit the request.</p></>}
     </aside></div>
 
-    {checkoutOpen&&<div className="store-checkout-overlay" onMouseDown={e=>e.target===e.currentTarget&&!checkoutState.busy&&setCheckoutOpen(false)}><section className="store-checkout-card" role="dialog" aria-modal="true" aria-label="Canadian checkout"><button className="store-checkout-x" type="button" onClick={()=>setCheckoutOpen(false)} disabled={checkoutState.busy}>×</button>{checkoutState.ok?<div className="store-checkout-success"><span>REQUEST RECEIVED</span><h2>{checkoutState.orderNumber||'Order submitted'}</h2><p>{checkoutState.message}</p><div className="store-payment-method"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Do not send funds yet. You will receive the exact CAD amount, e-Transfer address and order reference after approval.</p></div><button type="button" onClick={()=>setCheckoutOpen(false)}>Close</button></div>:<><div className="store-checkout-head"><span>CANADIAN CHECKOUT</span><h2>Review your price.</h2><p>Apply a promo code here and confirm the discounted product total before submitting your request.</p></div><div className="checkout-price-panel"><div className="checkout-price-product"><div><span>SELECTED PACKAGE</span><strong>{cart?.label||'Selected package'}</strong></div><b>${money(cartSubtotalCents/100)} CAD</b></div><div className="checkout-price-lines"><div><span>Product subtotal</span><strong>${money(cartSubtotalCents/100)} CAD</strong></div>{promo&&<div className="checkout-discount-line"><span>Promo · {promo.code}</span><strong>−${money(cartDiscountCents/100)} CAD</strong></div>}<div className="checkout-final-line"><span>Product total</span><strong>${money(cartTotalCents/100)} CAD</strong></div></div><form className="checkout-promo-form" onSubmit={applyPromo}><label htmlFor="checkout-promo-code">Promo code</label><div><input id="checkout-promo-code" value={promoInput} onChange={e=>setPromoInput(e.target.value.toUpperCase())} placeholder="Enter promo code" maxLength="32" disabled={promoState.busy}/>{promo?<button type="button" className="promo-remove" onClick={removePromo}>Remove</button>:<button type="submit" disabled={promoState.busy||!promoInput.trim()}>{promoState.busy?'Checking…':'Apply'}</button>}</div>{promoState.message&&<p className={`promo-message ${promoState.error?'is-error':'is-valid'}`} role="status">{promoState.message}</p>}</form><p className="checkout-price-note">Promo codes apply to the Canadian product subtotal. Delivery and any applicable taxes are confirmed separately during review.</p></div><form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy}>{checkoutState.busy?'Submitting…':<>Submit request · ${money(cartTotalCents/100)} CAD <Icon name="chevron" size={17}/></>}</button></form></>}</section></div>}
+    {checkoutOpen&&<div className="store-checkout-overlay" onMouseDown={e=>e.target===e.currentTarget&&!checkoutState.busy&&setCheckoutOpen(false)}>
+      <section className="store-checkout-card" role="dialog" aria-modal="true" aria-label="Canadian checkout">
+        <button className="store-checkout-x" type="button" onClick={()=>setCheckoutOpen(false)} disabled={checkoutState.busy}>×</button>
+        {checkoutState.ok?<div className="store-checkout-success"><span>REQUEST RECEIVED</span><h2>{checkoutState.orderNumber||'Order submitted'}</h2><p>{checkoutState.message}</p><div className="store-payment-method"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Do not send funds yet. You will receive the exact CAD amount, e-Transfer address and order reference after approval.</p></div><button type="button" onClick={()=>setCheckoutOpen(false)}>Close</button></div>:<>
+          <div className="store-checkout-head"><span>CANADIAN CHECKOUT</span><h2>Review your price.</h2><p>Apply a promo code and, if earned, a referral reward. Your final product total updates before you submit the request.</p></div>
+          <div className="checkout-price-panel">
+            <div className="checkout-price-product"><div><span>SELECTED PACKAGE</span><strong>{cart?.label||'Selected package'}</strong></div><b>${money(cartSubtotalCents/100)} CAD</b></div>
+            <div className="checkout-price-lines">
+              <div><span>Product subtotal</span><strong>${money(cartSubtotalCents/100)} CAD</strong></div>
+              {promo&&<div className="checkout-discount-line"><span>Promo · {promo.code}</span><strong>−${money(cartDiscountCents/100)} CAD</strong></div>}
+              {reward&&<div className="checkout-discount-line referral-reward-line"><span>Referral reward · {reward.code}</span><strong>−${money(cartRewardDiscountCents/100)} CAD</strong></div>}
+              <div className="checkout-final-line"><span>Product total</span><strong>${money(cartTotalCents/100)} CAD</strong></div>
+            </div>
+            <div className="checkout-code-grid">
+              <form className="checkout-promo-form" onSubmit={applyPromo}><label htmlFor="checkout-promo-code">Promo code</label><div><input id="checkout-promo-code" value={promoInput} onChange={e=>setPromoInput(e.target.value.toUpperCase())} placeholder="Enter promo code" maxLength="32" disabled={promoState.busy}/>{promo?<button type="button" className="promo-remove" onClick={removePromo}>Remove</button>:<button type="submit" disabled={promoState.busy||!promoInput.trim()}>{promoState.busy?'Checking…':'Apply'}</button>}</div>{promoState.message&&<p className={`promo-message ${promoState.error?'is-error':'is-valid'}`} role="status">{promoState.message}</p>}</form>
+              <form className="checkout-promo-form referral-reward-form" onSubmit={applyReward}><label htmlFor="checkout-reward-code">Referral reward</label><div><input id="checkout-reward-code" value={rewardInput} onChange={e=>setRewardInput(e.target.value.toUpperCase())} placeholder="REF5-XXXXXXXX" maxLength="32" disabled={rewardState.busy}/>{reward?<button type="button" className="promo-remove" onClick={removeReward}>Remove</button>:<button type="submit" disabled={rewardState.busy||!rewardInput.trim()}>{rewardState.busy?'Checking…':'Apply 5%'}</button>}</div>{rewardState.message&&<p className={`promo-message ${rewardState.error?'is-error':'is-valid'}`} role="status">{rewardState.message}</p>}<small>Each reward code is single-use for 5% off and stacks after your promo code.</small></form>
+            </div>
+            <form className="checkout-referral-form" onSubmit={applyReferral}><div><label htmlFor="checkout-referral-code">Were you referred by someone?</label><small>Enter their referral code. Your order price does not change; they earn a 5% reward after your order is fulfilled.</small></div><div className="checkout-referral-control"><input id="checkout-referral-code" value={referralInput} onChange={e=>setReferralInput(e.target.value.toUpperCase())} placeholder="Referral code" maxLength="32" disabled={referralState.busy}/>{referral?<button type="button" className="promo-remove" onClick={removeReferral}>Remove</button>:<button type="submit" disabled={referralState.busy||!referralInput.trim()}>{referralState.busy?'Checking…':'Apply'}</button>}</div>{referralState.message&&<p className={`promo-message ${referralState.error?'is-error':'is-valid'}`} role="status">{referralState.message}</p>}</form>
+            <p className="checkout-price-note">Referral rewards are single-use and available only to the email registered to that referral code. Regular promo codes and one referral reward can be used together. Delivery and any applicable taxes are confirmed separately during review.</p>
+          </div>
+          <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy}>{checkoutState.busy?'Submitting…':<>Submit request · ${money(cartTotalCents/100)} CAD <Icon name="chevron" size={17}/></>}</button></form>
+        </>}
+      </section>
+    </div>}
 
     <div className="mobile-atc"><div><small>{selectedPack.label}</small><b>${money(selectedPack.price)} CAD</b></div><button onClick={addToCart} disabled={!selectedInStock}>{selectedInStock?'Add to cart':'Unavailable'}</button></div>
   </div>;

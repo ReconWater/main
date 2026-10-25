@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomBytes } from 'node:crypto';
 import {packageAvailability} from '../../src/availability.js';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -26,6 +27,26 @@ async function validatePromo(db,rawCode,subtotal){
   if(discount<=0) throw new Error('Promo code is invalid or unavailable');
   return {promo,discount,final:Math.max(0,Number(subtotal)-discount)};
 }
+const newReferralRewardCode = () => `REF5-${randomBytes(4).toString('hex').toUpperCase()}`;
+async function createReferralReward(db,referralId,sourceOrderId){
+  const {data:existing,error:existingError}=await db.from('referral_rewards').select('*').eq('source_order_id',sourceOrderId).maybeSingle();
+  if(existingError) throw existingError;
+  if(existing?.reward_code) return {reward:existing,created:false};
+  for(let attempt=0;attempt<4;attempt++){
+    const code=newReferralRewardCode();
+    if(existing){
+      const {data,error}=await db.from('referral_rewards').update({reward_code:code}).eq('id',existing.id).is('reward_code',null).select('*').maybeSingle();
+      if(!error&&data) return {reward:data,created:false};
+      if(error?.code!=='23505'&&error) throw error;
+    }else{
+      const {data,error}=await db.from('referral_rewards').insert({referral_id:referralId,source_order_id:sourceOrderId,reward_code:code}).select('*').single();
+      if(!error) return {reward:data,created:true};
+      if(error?.code!=='23505') throw error;
+    }
+  }
+  throw new Error('Referral reward code could not be created');
+}
+
 async function secureDomesticSubtotal(db,items){
   if(!Array.isArray(items)||items.length<1||items.length>4) throw new Error('Invalid package selection');
   const ids=[...new Set(items.map(i=>String(i?.package_id||'')).filter(Boolean))];
@@ -70,7 +91,7 @@ function paymentInstructions(order,settings){
 
 const safeError = e => {
   const m=String(e?.message||'Request failed');
-  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|Payment|Interac|USDC|International)/i.test(m)) return m;
+  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|Payment|Interac|USDC|International|Referral)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
 
@@ -163,7 +184,7 @@ export default async request => {
     const rpc=async(name,params)=>{const {data,error}=await db.rpc(name,params);if(error)throw error;return data;};
 
     if(action==='dashboard') {
-      const [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings]=await Promise.all([
+      const [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings,referrals,rewards]=await Promise.all([
         db.from('products').select('*').eq('sku','BW-30ML'),
         db.from('product_packages').select('*').order('vials_per_pack'),
         db.from('inventory_lots').select('*').order('expiry_date'),
@@ -172,12 +193,15 @@ export default async request => {
         db.from('order_allocations_v2').select('*').order('created_at',{ascending:false}).limit(250),
         db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50),
         db.from('promo_codes').select('*').order('created_at',{ascending:false}),
-        db.from('payment_settings').select('*').eq('id',1).maybeSingle()
+        db.from('payment_settings').select('*').eq('id',1).maybeSingle(),
+        db.from('referral_codes').select('*').order('created_at',{ascending:false}),
+        db.from('referral_rewards').select('*').order('created_at',{ascending:false})
       ]);
-      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings]) if(r.error)throw r.error;
+      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings,referrals,rewards]) if(r.error)throw r.error;
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
-        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[],paymentSettings:paymentSettings.data||null});
+        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[],paymentSettings:paymentSettings.data||null,
+        referrals:referrals.data||[],referralRewards:rewards.data||[]});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -202,12 +226,23 @@ export default async request => {
       p_reason:body.reason,p_actor:user.id});return reply({ok:true});}
     if(action==='open-case') {await rpc('service_admin_open_case_v2',{p_lot_id:body.lot_id,p_actor:user.id});return reply({ok:true});}
     if(action==='order-status') {
+      let transitionOrder=null,rewardCreated=false;
       if(body.status==='fulfilled'){
-        const {data:order,error}=await db.from('orders').select('payment_method,payment_status').eq('id',body.order_id).maybeSingle();
+        const {data:order,error}=await db.from('orders').select('id,payment_method,payment_status,referral_id').eq('id',body.order_id).maybeSingle();
         if(error) throw error;
+        transitionOrder=order;
         if(order?.payment_method && order.payment_status!=='paid') return reply({error:'Payment must be marked paid before fulfillment'},409);
+        if(order?.referral_id){
+          const result=await createReferralReward(db,order.referral_id,body.order_id);
+          rewardCreated=result.created;
+        }
       }
-      await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
+      try{
+        await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
+      }catch(error){
+        if(rewardCreated) await db.from('referral_rewards').delete().eq('source_order_id',body.order_id);
+        throw error;
+      }
       if(body.status==='cancelled') await db.from('orders').update({payment_status:'cancelled'}).eq('id',body.order_id).neq('payment_status','paid');
       return reply({ok:true});
     }
@@ -232,6 +267,20 @@ export default async request => {
       else result=await db.from('promo_codes').insert(payload).select('*').single();
       if(result.error) throw result.error;
       return reply({promo:result.data});
+    }
+    if(action==='save-referral') {
+      const id=body.id?String(body.id):null;
+      const code=String(body.code||'').trim().toUpperCase();
+      const name=String(body.referrer_name||'').trim();
+      const email=String(body.referrer_email||'').trim().toLowerCase();
+      if(!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) return reply({error:'Referral code must be 3-32 characters using letters, numbers, hyphens or underscores'},400);
+      if(name.length<2||name.length>120||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return reply({error:'Enter a valid referrer name and email'},400);
+      const payload={code,referrer_name:name,referrer_email:email,active:!!body.active,internal_note:String(body.internal_note||'').slice(0,300),updated_at:new Date().toISOString()};
+      let result;
+      if(id) result=await db.from('referral_codes').update(payload).eq('id',id).select('*').single();
+      else result=await db.from('referral_codes').insert(payload).select('*').single();
+      if(result.error) throw result.error;
+      return reply({referral:result.data});
     }
     if(action==='save-payment-settings'){
       const etransferEnabled=!!body.etransfer_enabled;
@@ -259,7 +308,7 @@ export default async request => {
       const settings=await loadPaymentSettings(db);
       if(method==='etransfer' && (!settings.etransfer_enabled||!settings.etransfer_email)) return reply({error:'Interac e-Transfer is not enabled in Payment methods'},409);
       if(method==='usdc_eth' && (!settings.usdc_eth_enabled||!isEthAddress(settings.usdc_eth_address))) return reply({error:'USDC on Ethereum is not enabled in Payment methods'},409);
-      const netProduct=Math.max(0,Number(order.subtotal_cents||0)-Number(order.promo_discount_cents||0));
+      const netProduct=Math.max(0,Number(order.subtotal_cents||0)-Number(order.promo_discount_cents||0)-Number(order.referral_reward_discount_cents||0));
       const fixedIntl=netProduct+Number(order.shipping_cents||0);
       const requested=Number(body.amount_cents);
       let amount;

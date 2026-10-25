@@ -1,11 +1,3 @@
-.international-page{background:linear-gradient(180deg,#f7fafb 0%,#fff 100%)}
-.international-page .site-header{position:sticky}
-.international-standalone{min-height:calc(100vh - 116px);display:flex;align-items:center;padding:72px 0 90px;border-top:0}
-.international-standalone .international-copy{padding-top:0}
-.international-standalone .international-copy h1{font:800 clamp(42px,4.8vw,64px)/1.02 Manrope;margin:18px 0 18px;letter-spacing:-.055em}
-.international-standalone .international-copy h1 em{font-style:normal;color:var(--blue)}
-.international-return-link{display:inline-flex;align-items:center;gap:7px;margin-top:22px;color:#526b77;font-size:10px;font-weight:750}
-.international-return-link:hover{color:var(--blue)}
-.international-card-head h2{font:800 20px Manrope;margin:0}
-@media(max-width:780px){.international-page .desktop-nav{display:none}.international-standalone{align-items:flex-start;padding-top:48px}.international-standalone .international-copy h1{font-size:40px}}
-@media(max-width:650px){.international-page .trustbar-inner{font-size:9px;gap:8px}.international-page .trustbar-inner span:nth-of-type(2),.international-page .trustbar-sep:nth-of-type(2){display:none}.international-standalone{padding:44px 0 58px}.international-standalone .international-copy h1{font-size:36px}.international-return-link{margin-bottom:6px}}
+
+/* Referral attribution does not alter international pricing */
+.intl-referral-box{margin:14px 0 16px;border:1px solid #dbe6ea;background:#f8fbfc;border-radius:14px;padding:13px 14px;display:grid;grid-template-columns:1fr auto;gap:8px 14px;align-items:end}.intl-referral-box>div{display:grid;gap:4px}.intl-referral-box span{font-size:8px;font-weight:900;letter-spacing:.13em;color:#607781}.intl-referral-box p{margin:0;font-size:9px;line-height:1.5;color:#73868e}.intl-referral-box form{display:grid;grid-template-columns:minmax(135px,185px) auto;gap:7px}.intl-referral-box input{height:41px;border:1px solid #cbdbe1;border-radius:10px;background:#fff;padding:0 11px;font:700 11px Inter;color:#16313c;text-transform:uppercase;letter-spacing:.04em;outline:none}.intl-referral-box button{height:41px;border:0;border-radius:10px;background:#0a2634;color:#fff;padding:0 13px;font-size:9px;font-weight:800;cursor:pointer}.intl-referral-box small{grid-column:1/-1;font-size:8.5px}.intl-referral-box small.ok{color:#14724e}.intl-referral-box small.error{color:#a14343}@media(max-width:650px){.intl-referral-box{grid-template-columns:1fr}.intl-referral-box form{grid-template-columns:1fr 84px}}

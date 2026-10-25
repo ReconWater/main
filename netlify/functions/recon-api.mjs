@@ -30,6 +30,41 @@ async function validateDomesticPromo(db, rawCode, subtotalCents) {
   return { promo, discount, final: Math.max(0, Number(subtotalCents) - discount) };
 }
 
+const normalizeReferralCode = value => String(value || '').trim().toUpperCase();
+const referralCodeValid = code => /^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code);
+async function loadReferral(db, rawCode) {
+  const code = normalizeReferralCode(rawCode);
+  if (!referralCodeValid(code)) return null;
+  const { data, error } = await db.from('referral_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+async function validateReferralAttribution(db, rawCode, customerEmail = '') {
+  const referral = await loadReferral(db, rawCode);
+  if (!referral) return null;
+  const email = String(customerEmail || '').trim().toLowerCase();
+  if (email && email === String(referral.referrer_email || '').trim().toLowerCase()) return null;
+  return referral;
+}
+async function validateReferralReward(db, rawCode, customerEmail, eligibleSubtotalCents) {
+  const code = normalizeReferralCode(rawCode);
+  if (!referralCodeValid(code)) return null;
+  const { data: reward, error } = await db.from('referral_rewards').select('*')
+    .eq('reward_code', code).is('redeemed_order_id', null).maybeSingle();
+  if (error) throw error;
+  if (!reward) return null;
+  const { data: referral, error: referralError } = await db.from('referral_codes').select('*')
+    .eq('id', reward.referral_id).eq('active', true).maybeSingle();
+  if (referralError) throw referralError;
+  if (!referral) return null;
+  const email = String(customerEmail || '').trim().toLowerCase();
+  if (email && email !== String(referral.referrer_email || '').trim().toLowerCase()) return null;
+  const base = Math.max(0, Number(eligibleSubtotalCents || 0));
+  const discount = Math.min(base, Math.floor(base * 0.05));
+  if (discount <= 0) return null;
+  return { referral, reward, discount, final: Math.max(0, base - discount) };
+}
+
 function getAdminClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -150,6 +185,33 @@ export async function handler(event) {
       });
     }
 
+    if (event.httpMethod === 'POST' && mode === 'referral-validate') {
+      let body;
+      try { body = JSON.parse(event.body || '{}'); }
+      catch { return json(400, { error: 'Invalid request data.' }); }
+      const purpose = String(body.purpose || 'attribution');
+      const code = normalizeReferralCode(body.code);
+      if (!referralCodeValid(code)) return json(400, { error: 'Referral code is invalid or unavailable.' });
+      if (purpose === 'attribution') {
+        const referral = await validateReferralAttribution(db, code, body.email || '');
+        if (!referral) return json(400, { error: 'Referral code is invalid or unavailable.' });
+        return json(200, { code: referral.code, valid: true });
+      }
+      if (purpose !== 'reward') return json(400, { error: 'Invalid referral request.' });
+      const packageId = String(body.package_id || '');
+      const { data: pack, error: packError } = await db.from('product_packages').select('id,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
+      if (packError) throw packError;
+      if (!pack || pack.price_cents == null) return json(400, { error: 'Referral reward could not be applied.' });
+      const subtotal = Number(pack.price_cents);
+      const promoCode = normalizePromoCode(body.promo_code);
+      const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotal) : null;
+      if (promoCode && !promoResult) return json(409, { error: 'Promo code changed. Review your total before applying the referral reward.' });
+      const afterPromo = promoResult ? promoResult.final : subtotal;
+      const reward = await validateReferralReward(db, code, body.email || '', afterPromo);
+      if (!reward) return json(400, { error: 'Referral reward is invalid, already used, or unavailable.' });
+      return json(200, { code: reward.reward.reward_code, discount_cents: reward.discount, eligible_subtotal_cents: afterPromo, final_subtotal_cents: reward.final, rate: 5 });
+    }
+
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
       let body;
       try { body = JSON.parse(event.body || '{}'); }
@@ -160,6 +222,8 @@ export async function handler(event) {
       const notes = String(body.notes || '');
       const packageId = String(body.package_id || '');
       const promoCode = normalizePromoCode(body.promo_code);
+      const referralCode = normalizeReferralCode(body.referral_code);
+      const referralRewardCode = normalizeReferralCode(body.referral_reward_code);
       const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
       if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 1000 || !packageId) {
         return json(400, { error: 'Invalid customer details.' });
@@ -193,7 +257,13 @@ export async function handler(event) {
       const subtotalCents = Number(pack.price_cents);
       const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotalCents) : null;
       if (promoCode && !promoResult) return json(409, { error: 'Promo code is invalid or unavailable. Review your total before submitting.' });
+      const referral = referralCode ? await validateReferralAttribution(db, referralCode, email) : null;
+      if (referralCode && !referral) return json(409, { error: 'Referral code is invalid or cannot be used for this order.' });
+      const afterPromoCents = promoResult ? promoResult.final : subtotalCents;
+      const referralReward = referralRewardCode ? await validateReferralReward(db, referralRewardCode, email, afterPromoCents) : null;
+      if (referralRewardCode && !referralReward) return json(409, { error: 'Referral reward is invalid, already used, or does not belong to this email. Review your total before submitting.' });
       let promoClaimed = false;
+      let rewardClaimed = false;
       if (promoResult) {
         const currentUses = Number(promoResult.promo.uses_count || 0);
         const { data: claimed, error: claimError } = await db.from('promo_codes').update({ uses_count: currentUses + 1, updated_at: new Date().toISOString() }).eq('id', promoResult.promo.id).eq('uses_count', currentUses).select('id').maybeSingle();
@@ -223,12 +293,34 @@ export async function handler(event) {
           insert.promo_discount_cents = promoResult.discount;
           insert.promo_discount_currency = 'CAD';
         }
+        if (referral) {
+          insert.referral_id = referral.id;
+          insert.referral_code = referral.code;
+        }
+        if (referralReward) {
+          insert.referral_reward_referral_id = referralReward.referral.id;
+          insert.referral_reward_code = referralReward.reward.reward_code;
+          insert.referral_reward_discount_cents = referralReward.discount;
+          insert.referral_reward_currency = 'CAD';
+        }
         const { data: created, error: orderError } = await db.from('orders').insert(insert).select('id,order_number').single();
         if (orderError) throw orderError;
         order = created;
+        if (referralReward) {
+          const { data: claimedReward, error: rewardError } = await db.from('referral_rewards')
+            .update({ redeemed_order_id: order.id, redeemed_at: new Date().toISOString() })
+            .eq('id', referralReward.reward.id).is('redeemed_order_id', null).select('id').maybeSingle();
+          if (rewardError) throw rewardError;
+          if (!claimedReward) throw new Error('Referral reward is no longer available. Review your total before submitting.');
+          rewardClaimed = true;
+        }
         const { error: itemError } = await db.from('order_items').insert({ order_id: order.id, product_id: product.id, product_name: product.name, sku: pack.sku, quantity: 1, unit_price_cents: subtotalCents, package_id: pack.id, package_label: pack.label, vials_per_pack: pack.vials_per_pack, stock_kind: pack.stock_kind });
         if (itemError) throw itemError;
       } catch (error) {
+        if (rewardClaimed && referralReward && order?.id) {
+          await db.from('referral_rewards').update({ redeemed_order_id: null, redeemed_at: null })
+            .eq('id', referralReward.reward.id).eq('redeemed_order_id', order.id);
+        }
         if (order?.id) { await db.from('order_items').delete().eq('order_id', order.id); await db.from('orders').delete().eq('id', order.id); }
         if (promoClaimed && promoResult) {
           const expected = Number(promoResult.promo.uses_count || 0) + 1;
@@ -236,7 +328,12 @@ export async function handler(event) {
         }
         throw error;
       }
-      return json(200, { order_id: order.id, order_number: order.order_number || null, promo: promoResult ? { code: promoResult.promo.code, discount_cents: promoResult.discount, final_subtotal_cents: promoResult.final } : null });
+      return json(200, {
+        order_id: order.id,
+        order_number: order.order_number || null,
+        promo: promoResult ? { code: promoResult.promo.code, discount_cents: promoResult.discount, final_subtotal_cents: promoResult.final } : null,
+        referral_reward: referralReward ? { code: referralReward.reward.reward_code, discount_cents: referralReward.discount, final_subtotal_cents: referralReward.final } : null,
+      });
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-international') {
@@ -248,6 +345,7 @@ export async function handler(event) {
       const name = String(body.name || '').trim();
       const email = String(body.email || '').trim();
       const notes = String(body.notes || '');
+      const referralCode = normalizeReferralCode(body.referral_code);
       const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
 
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) {
@@ -269,6 +367,9 @@ export async function handler(event) {
       if (['canada', 'ca', 'can'].includes(country.toLowerCase())) {
         return json(400, { error: 'Canadian addresses must use the domestic ordering flow.' });
       }
+
+      const referral = referralCode ? await validateReferralAttribution(db, referralCode, email) : null;
+      if (referralCode && !referral) return json(409, { error: 'Referral code is invalid or cannot be used for this order.' });
 
       const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
       const { count: recentCount, error: recentError } = await db
@@ -328,6 +429,8 @@ export async function handler(event) {
           shipping_currency: 'USD',
           payment_method: 'usdc_eth',
           payment_status: 'not_requested',
+          referral_id: referral?.id || null,
+          referral_code: referral?.code || null,
         })
         .select('id,order_number')
         .single();
