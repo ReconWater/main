@@ -184,24 +184,48 @@ export default async request => {
     const rpc=async(name,params)=>{const {data,error}=await db.rpc(name,params);if(error)throw error;return data;};
 
     if(action==='dashboard') {
-      const [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings,referrals,rewards]=await Promise.all([
+      // Core operations must stay available even if a newer optional module has not
+      // been migrated yet. Promo/payment/referral features are loaded independently
+      // and report their own migration warning instead of taking down /admin.
+      const [pr,pk,lo,ord,ev,alloc,prices]=await Promise.all([
         db.from('products').select('*').eq('sku','BW-30ML'),
         db.from('product_packages').select('*').order('vials_per_pack'),
         db.from('inventory_lots').select('*').order('expiry_date'),
         db.from('orders').select('*,order_items(*)').order('created_at',{ascending:false}).limit(150),
         db.from('inventory_events_v2').select('*').order('created_at',{ascending:false}).limit(150),
         db.from('order_allocations_v2').select('*').order('created_at',{ascending:false}).limit(250),
-        db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50),
-        db.from('promo_codes').select('*').order('created_at',{ascending:false}),
-        db.from('payment_settings').select('*').eq('id',1).maybeSingle(),
-        db.from('referral_codes').select('*').order('created_at',{ascending:false}),
-        db.from('referral_rewards').select('*').order('created_at',{ascending:false})
+        db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50)
       ]);
-      for(const r of [pr,pk,lo,ord,ev,alloc,prices,promos,paymentSettings,referrals,rewards]) if(r.error)throw r.error;
+      for(const r of [pr,pk,lo,ord,ev,alloc,prices]) if(r.error) throw r.error;
+
+      const moduleWarnings=[];
+      const optionalModule=async(id,label,migration,promise,fallback)=>{
+        try{
+          const result=await promise;
+          if(result?.error) throw result.error;
+          return result?.data ?? fallback;
+        }catch(error){
+          moduleWarnings.push({id,label,migration,message:`${label} is not initialized in the current database schema.`});
+          return fallback;
+        }
+      };
+
+      const [promos,paymentSettings,referrals,rewards]=await Promise.all([
+        optionalModule('promos','Promo codes','supabase/006_promo_codes.sql',
+          db.from('promo_codes').select('id,code,discount_type,discount_value,min_subtotal_cents,max_uses,uses_count,starts_on,ends_on,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
+        optionalModule('payments','Payment methods','supabase/008_manual_payments.sql',
+          db.from('payment_settings').select('id,etransfer_enabled,etransfer_email,etransfer_recipient_name,etransfer_note,usdc_eth_enabled,usdc_eth_address,usdc_note,updated_at').eq('id',1).maybeSingle(),null),
+        optionalModule('referrals','Referral accounts','supabase/009_referral_system.sql',
+          db.from('referral_codes').select('id,code,referrer_name,referrer_email,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
+        optionalModule('referrals','Referral rewards','supabase/009_referral_system.sql',
+          db.from('referral_rewards').select('id,referral_id,source_order_id,reward_code,redeemed_order_id,redeemed_at,created_at').order('created_at',{ascending:false}),[])
+      ]);
+      // One concise warning per module.
+      const warnings=[...new Map(moduleWarnings.map(w=>[w.id,w])).values()];
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
-        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos:promos.data||[],paymentSettings:paymentSettings.data||null,
-        referrals:referrals.data||[],referralRewards:rewards.data||[]});
+        movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
+        referrals,referralRewards:rewards,moduleWarnings:warnings});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));

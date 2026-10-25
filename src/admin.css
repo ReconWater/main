@@ -296,3 +296,23 @@
 .admin-referral-editors{display:grid;gap:14px}.referral-editor{border:1px solid #dbe6ea;border-radius:15px;background:#fff;padding:18px}.referral-editor.is-new{background:linear-gradient(145deg,#fbfdfe,#f4f9fa);border-style:dashed}.referral-editor-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}.referral-editor-head>div{display:flex;flex-direction:column;gap:3px}.referral-editor-head>div>span{font-size:9px;font-weight:800;letter-spacing:.12em;color:#79909a}.referral-editor-head strong{font:800 17px Manrope;color:#173a49;letter-spacing:-.02em}.referral-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px}.referral-stats span{border:1px solid #e2ebee;border-radius:11px;background:#f8fbfc;padding:10px 12px;font-size:10px;color:#6d828c}.referral-stats b{display:block;font:800 17px Manrope;color:#173a49;margin-bottom:2px}.admin-referral-order{display:block;margin-top:5px;font-size:10px;color:#6b4fb5;font-weight:700}
 @media(max-width:700px){.referral-stats{grid-template-columns:1fr}}
 .referral-reward-codes{margin:-4px 0 16px;border:1px solid #e5e0f3;background:#faf9ff;border-radius:11px;padding:10px 12px}.referral-reward-codes>span{display:block;margin-bottom:7px;font-size:8px;font-weight:900;letter-spacing:.12em;color:#7767a4}.referral-reward-codes>div{display:flex;flex-wrap:wrap;gap:7px}.referral-reward-codes button{border:1px solid #ddd4f1;background:#fff;color:#5d4798;border-radius:8px;padding:7px 9px;font:800 10px Manrope;letter-spacing:.03em;cursor:pointer}.referral-reward-codes button:hover{background:#f3effd}
+
+/* Optional-module health notice: core operations remain usable when add-on migrations are pending. */
+.admin-module-warning{
+  margin:18px 24px 0;
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  padding:14px 16px;
+  border:1px solid #ead9aa;
+  border-radius:12px;
+  background:linear-gradient(180deg,#fffdf7 0%,#fff9e9 100%);
+  color:#765b16;
+  box-shadow:0 6px 18px rgba(79,61,13,.05);
+}
+.admin-module-warning>svg{flex:0 0 auto;margin-top:1px;color:#9c7617}
+.admin-module-warning>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.admin-module-warning strong{font:800 12px/1.35 Manrope,Arial,sans-serif;color:#5d4814}
+.admin-module-warning span{font-size:10px;line-height:1.6;color:#806823}
+.admin-module-warning code{padding:2px 5px;border-radius:5px;background:rgba(125,96,24,.08);color:#634c12;font:700 9px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media(max-width:700px){.admin-module-warning{margin:12px 14px 0;padding:12px 13px}.admin-module-warning span{font-size:9px}}
