@@ -131,55 +131,39 @@ ALTER TABLE public.recon_inventory_lot_movements ALTER COLUMN note SET DEFAULT '
 ALTER TABLE public.recon_inventory_lot_movements ALTER COLUMN created_at SET DEFAULT now();
 
 DO $repair$
-DECLARE
-  v_product uuid;
 BEGIN
-  -- Resolve the actual Recon product without relying on products.slug.
-  SELECT p.id INTO v_product
-  FROM public.products p
-  WHERE lower(coalesce(p.name,'')) LIKE '%bacteriostatic%water%'
-  ORDER BY coalesce(p.active,false) DESC, p.updated_at DESC NULLS LAST, p.id
-  LIMIT 1;
-
-  IF v_product IS NULL THEN
-    SELECT p.id INTO v_product
-    FROM public.products p
-    JOIN public.product_variants v ON v.product_id=p.id AND v.market::text='domestic'
-    GROUP BY p.id,p.active,p.updated_at
-    HAVING bool_or(v.package_quantity=1) AND bool_or(v.package_quantity=25)
-    ORDER BY coalesce(p.active,false) DESC,p.updated_at DESC NULLS LAST,p.id
-    LIMIT 1;
-  END IF;
-
-  IF v_product IS NULL THEN
-    RAISE EXCEPTION USING ERRCODE='P0001', MESSAGE='RECON_BATCH_REPAIR_PRODUCT_NOT_FOUND';
-  END IF;
-
-  -- Normalize config rows. Recon Water has one batch-controlled parent product.
+  -- Normalize partial rows without guessing which products row belongs to Recon Water.
+  -- Product binding is performed explicitly by recon_bind_inventory_product() from
+  -- the server after it resolves the live RW-BAC-* product variants.
   UPDATE public.recon_inventory_config SET enabled=false WHERE enabled IS NULL;
   UPDATE public.recon_inventory_config SET case_size=25 WHERE case_size IS NULL OR case_size<>25;
   UPDATE public.recon_inventory_config SET updated_at=now() WHERE updated_at IS NULL;
 
-  -- If a partial installer created singleton/config rows without product_id,
-  -- retain one row and bind it to the actual Recon product.
   DELETE FROM public.recon_inventory_config a
   USING public.recon_inventory_config b
   WHERE a.product_id IS NULL AND b.product_id IS NULL AND a.ctid>b.ctid;
-  UPDATE public.recon_inventory_config SET product_id=v_product WHERE product_id IS NULL;
 
-  -- De-duplicate any partial config rows before adding the unique index.
-  DELETE FROM public.recon_inventory_config a
-  USING public.recon_inventory_config b
-  WHERE a.product_id=b.product_id AND a.ctid>b.ctid;
+  -- Keep one canonical config row per already-bound product before the unique
+  -- index is created. Prefer an enabled/latest row when partial migrations left duplicates.
+  DELETE FROM public.recon_inventory_config c
+  USING (
+    SELECT ctid,
+           row_number() OVER (
+             PARTITION BY product_id
+             ORDER BY coalesce(enabled,false) DESC, updated_at DESC NULLS LAST, ctid
+           ) AS rn
+    FROM public.recon_inventory_config
+    WHERE product_id IS NOT NULL
+  ) d
+  WHERE c.ctid=d.ctid AND d.rn>1;
 
-  -- Repair/normalize existing lot rows without inventing an expiry date. A lot
-  -- with an unknown expiry remains non-sellable until Admin records the date.
   UPDATE public.recon_inventory_lots SET id=gen_random_uuid() WHERE id IS NULL;
-  UPDATE public.recon_inventory_lots SET product_id=v_product WHERE product_id IS NULL;
-  UPDATE public.recon_inventory_lots SET lot_code='LEGACY-'||substr(id::text,1,8) WHERE nullif(btrim(coalesce(lot_code,'')),'') IS NULL;
+  UPDATE public.recon_inventory_lots SET lot_code='LEGACY-'||substr(id::text,1,8)
+    WHERE nullif(btrim(coalesce(lot_code,'')),'') IS NULL;
   UPDATE public.recon_inventory_lots SET supplier_reference='' WHERE supplier_reference IS NULL;
   UPDATE public.recon_inventory_lots SET location='' WHERE location IS NULL;
-  UPDATE public.recon_inventory_lots SET status='quarantine' WHERE status IS NULL OR status NOT IN ('quarantine','available','recalled');
+  UPDATE public.recon_inventory_lots SET status='quarantine'
+    WHERE status IS NULL OR status NOT IN ('quarantine','available','recalled');
   UPDATE public.recon_inventory_lots SET loose_on_hand=greatest(coalesce(loose_on_hand,0),0);
   UPDATE public.recon_inventory_lots SET loose_reserved=least(greatest(coalesce(loose_reserved,0),0),loose_on_hand);
   UPDATE public.recon_inventory_lots SET sealed_on_hand=greatest(coalesce(sealed_on_hand,0),0);
@@ -187,20 +171,20 @@ BEGIN
   UPDATE public.recon_inventory_lots SET created_at=now() WHERE created_at IS NULL;
   UPDATE public.recon_inventory_lots SET updated_at=now() WHERE updated_at IS NULL;
 
-  -- Repair movement rows. Missing historical product_id can be recovered from
-  -- the linked lot; otherwise bind to the Recon product so history remains usable.
   UPDATE public.recon_inventory_lot_movements m
   SET product_id=l.product_id
   FROM public.recon_inventory_lots l
-  WHERE m.product_id IS NULL AND m.lot_id=l.id;
-  UPDATE public.recon_inventory_lot_movements SET product_id=v_product WHERE product_id IS NULL;
-  UPDATE public.recon_inventory_lot_movements SET movement_type='legacy' WHERE nullif(btrim(coalesce(movement_type,'')),'') IS NULL;
-  UPDATE public.recon_inventory_lot_movements SET loose_on_hand_delta=coalesce(loose_on_hand_delta,0), loose_reserved_delta=coalesce(loose_reserved_delta,0), sealed_on_hand_delta=coalesce(sealed_on_hand_delta,0), sealed_reserved_delta=coalesce(sealed_reserved_delta,0), note=coalesce(note,''), created_at=coalesce(created_at,now());
-
-  IF NOT EXISTS (SELECT 1 FROM public.recon_inventory_config WHERE product_id=v_product) THEN
-    INSERT INTO public.recon_inventory_config(product_id,enabled,case_size,updated_at)
-    VALUES(v_product,false,25,now());
-  END IF;
+  WHERE m.product_id IS NULL AND m.lot_id=l.id AND l.product_id IS NOT NULL;
+  UPDATE public.recon_inventory_lot_movements
+  SET movement_type='legacy'
+  WHERE nullif(btrim(coalesce(movement_type,'')),'') IS NULL;
+  UPDATE public.recon_inventory_lot_movements
+  SET loose_on_hand_delta=coalesce(loose_on_hand_delta,0),
+      loose_reserved_delta=coalesce(loose_reserved_delta,0),
+      sealed_on_hand_delta=coalesce(sealed_on_hand_delta,0),
+      sealed_reserved_delta=coalesce(sealed_reserved_delta,0),
+      note=coalesce(note,''),
+      created_at=coalesce(created_at,now());
 END
 $repair$;
 
@@ -215,6 +199,58 @@ CREATE INDEX IF NOT EXISTS recon_inventory_lot_movements_lot_idx
   ON public.recon_inventory_lot_movements(lot_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS recon_inventory_lot_movements_product_idx
   ON public.recon_inventory_lot_movements(product_id,created_at DESC);
+
+CREATE OR REPLACE FUNCTION public.recon_bind_inventory_product(p_product_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=public
+AS $fn$
+DECLARE
+  v_exists boolean:=false;
+  v_bound_lots integer:=0;
+  v_bound_movements integer:=0;
+BEGIN
+  SELECT EXISTS(SELECT 1 FROM public.products WHERE id=p_product_id) INTO v_exists;
+  IF NOT v_exists THEN
+    RAISE EXCEPTION USING ERRCODE='P0002',MESSAGE='RECON_PRODUCT_NOT_FOUND';
+  END IF;
+
+  -- Preserve an already-bound config row. If an older partial installer left
+  -- one anonymous config row, bind that row instead of creating a duplicate.
+  IF NOT EXISTS(SELECT 1 FROM public.recon_inventory_config WHERE product_id=p_product_id) THEN
+    UPDATE public.recon_inventory_config
+    SET product_id=p_product_id, updated_at=now()
+    WHERE ctid=(SELECT ctid FROM public.recon_inventory_config WHERE product_id IS NULL LIMIT 1);
+    IF NOT FOUND THEN
+      INSERT INTO public.recon_inventory_config(product_id,enabled,case_size,updated_at)
+      VALUES(p_product_id,false,25,now());
+    END IF;
+  END IF;
+
+  UPDATE public.recon_inventory_lots
+  SET product_id=p_product_id, updated_at=now()
+  WHERE product_id IS NULL;
+  GET DIAGNOSTICS v_bound_lots = ROW_COUNT;
+
+  UPDATE public.recon_inventory_lot_movements m
+  SET product_id=coalesce(l.product_id,p_product_id)
+  FROM public.recon_inventory_lots l
+  WHERE m.product_id IS NULL AND m.lot_id=l.id;
+  GET DIAGNOSTICS v_bound_movements = ROW_COUNT;
+
+  UPDATE public.recon_inventory_lot_movements
+  SET product_id=p_product_id
+  WHERE product_id IS NULL;
+
+  RETURN jsonb_build_object(
+    'ok',true,
+    'product_id',p_product_id,
+    'bound_lots',v_bound_lots,
+    'bound_movements',v_bound_movements
+  );
+END
+$fn$;
 
 ALTER TABLE public.recon_inventory_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recon_inventory_lots ENABLE ROW LEVEL SECURITY;
@@ -632,6 +668,7 @@ BEGIN
 END
 $fn$;
 
+REVOKE ALL ON FUNCTION public.recon_bind_inventory_product(uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.recon_sync_variant_inventory(uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.recon_apply_batch_delta(uuid,text,text,integer) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.recon_receive_inventory_lot(uuid,text,date,text,text,integer,integer,uuid) FROM PUBLIC,anon,authenticated;
@@ -639,6 +676,7 @@ REVOKE ALL ON FUNCTION public.recon_update_inventory_lot(uuid,text,date,text,tex
 REVOKE ALL ON FUNCTION public.recon_adjust_inventory_lot(uuid,integer,integer,text,uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.recon_open_inventory_case(uuid,uuid) FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.recon_activate_batch_inventory(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.recon_bind_inventory_product(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.recon_sync_variant_inventory(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.recon_apply_batch_delta(uuid,text,text,integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.recon_receive_inventory_lot(uuid,text,date,text,text,integer,integer,uuid) TO service_role;
@@ -679,4 +717,5 @@ SELECT to_regclass('public.recon_inventory_config') AS config_table,
        to_regclass('public.recon_inventory_lots') AS lots_table,
        to_regclass('public.recon_inventory_lot_movements') AS movement_table,
        to_regprocedure('public.recon_open_inventory_case(uuid,uuid)') AS open_case_rpc,
-       to_regprocedure('public.recon_activate_batch_inventory(uuid,uuid)') AS activate_rpc;
+       to_regprocedure('public.recon_activate_batch_inventory(uuid,uuid)') AS activate_rpc,
+       to_regprocedure('public.recon_bind_inventory_product(uuid)') AS bind_product_rpc;

@@ -39,32 +39,17 @@ async function getReconShippingMode(db) {
 }
 
 function isMissingRelation(error) {
-  const code = String(error?.code || '').trim().toUpperCase();
+  const code = String(error?.code || '');
   const message = String(error?.message || '');
-  // PGRST205 is specifically a missing-table/object error. PGRST204 is a
-  // missing-column error and MUST NOT be treated as "table not installed".
-  // The previous generic /schema cache/ match caused exactly that false state.
-  return code === '42P01' || code === 'PGRST205' || /relation .* does not exist|could not find the table/i.test(message);
+  // PGRST205/42P01 are relation errors. Do NOT treat generic "schema cache"
+  // or PGRST204 as a missing table: PGRST204 is a missing-column error.
+  return code === '42P01' || code === 'PGRST205' || /could not find the table|relation [^ ]+ does not exist/i.test(message);
 }
 
-function batchSchemaError(error, objectName) {
-  const code = String(error?.code || '').trim().toUpperCase();
-  const message = String(error?.message || 'Unknown database error.');
-  const hint = String(error?.hint || '').trim();
-  const details = String(error?.details || '').trim();
-  return {
-    object: objectName,
-    code: code || null,
-    message,
-    details: details || null,
-    hint: hint || null,
-  };
-}
-
-function isSchemaShapeError(error) {
-  const code = String(error?.code || '').trim().toUpperCase();
+function isMissingFunction(error) {
+  const code = String(error?.code || '');
   const message = String(error?.message || '');
-  return code === 'PGRST204' || code === '42703' || /could not find the .* column|column .* does not exist/i.test(message);
+  return code === '42883' || code === 'PGRST202' || /function .* does not exist|could not find the function/i.test(message);
 }
 
 async function requireReconAdmin(event, db, allowedProfileRoles = null) {
@@ -117,46 +102,22 @@ async function requireInventoryAdmin(event, db) {
 }
 
 async function loadBatchState(db, productId, includeMovements = false) {
-  const { data: config, error: configError } = await db.from('recon_inventory_config')
-    .select('product_id,enabled,case_size,activated_at,activated_by,updated_at')
-    .eq('product_id', productId)
-    .maybeSingle();
+  const { data: config, error: configError } = await db.from('recon_inventory_config').select('*').eq('product_id', productId).maybeSingle();
   if (configError) {
-    if (isMissingRelation(configError)) {
-      return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(configError, 'recon_inventory_config') };
-    }
-    if (isSchemaShapeError(configError)) {
-      return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(configError, 'recon_inventory_config') };
-    }
+    if (isMissingRelation(configError)) return { installed: false, enabled: false, lots: [], movements: [] };
     throw configError;
   }
-
   const { data: lots, error: lotsError } = await db.from('recon_inventory_lots')
-    .select('id,product_id,lot_code,expiry_date,supplier_reference,location,status,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved,created_by,updated_by,created_at,updated_at')
-    .eq('product_id', productId)
-    .order('expiry_date', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true });
-  if (lotsError) {
-    if (isMissingRelation(lotsError)) return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(lotsError, 'recon_inventory_lots') };
-    if (isSchemaShapeError(lotsError)) return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(lotsError, 'recon_inventory_lots') };
-    throw lotsError;
-  }
-
+    .select('*').eq('product_id', productId).order('expiry_date', { ascending: true }).order('created_at', { ascending: true });
+  if (lotsError) throw lotsError;
   let movements = [];
   if (includeMovements) {
     const { data, error } = await db.from('recon_inventory_lot_movements')
-      .select('id,lot_id,product_id,movement_type,loose_on_hand_delta,loose_reserved_delta,sealed_on_hand_delta,sealed_reserved_delta,reference_type,reference_id,note,performed_by,created_at')
-      .eq('product_id', productId)
-      .order('created_at', { ascending: false })
-      .limit(120);
-    if (error) {
-      if (isMissingRelation(error)) return { installed: false, schema_status: 'data_api_missing', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(error, 'recon_inventory_lot_movements') };
-      if (isSchemaShapeError(error)) return { installed: false, schema_status: 'schema_mismatch', enabled: false, lots: [], movements: [], schema_error: batchSchemaError(error, 'recon_inventory_lot_movements') };
-      throw error;
-    }
+      .select('*').eq('product_id', productId).order('created_at', { ascending: false }).limit(120);
+    if (error) throw error;
     movements = data || [];
   }
-  return { installed: true, schema_status: 'ready', enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
+  return { installed: true, enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
 }
 
 function batchSummary(lots = []) {
@@ -176,64 +137,106 @@ function batchSummary(lots = []) {
   return { loose_on_hand:looseOnHand,loose_reserved:looseReserved,loose_available:looseAvailable,sealed_on_hand:sealedOnHand,sealed_reserved:sealedReserved,sealed_available:sealedAvailable,total_vial_equivalent:looseOnHand+(sealedOnHand*25),available_vial_equivalent:looseAvailable+(sealedAvailable*25) };
 }
 
+async function fetchProductById(db, productId) {
+  if (!productId) return null;
+  const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function chooseReconProductId(variants = []) {
+  const known = new Set(['RW-BAC-01','RW-BAC-05','RW-BAC-10','RW-BAC-25']);
+  const groups = new Map();
+  for (const row of variants || []) {
+    const productId = String(row?.product_id || '').trim();
+    if (!productId) continue;
+    const sku = String(row?.sku || '').trim().toUpperCase();
+    const qty = Number(row?.package_quantity || 0);
+    const entry = groups.get(productId) || { productId, skus:new Set(), quantities:new Set(), active:0 };
+    if (sku) entry.skus.add(sku);
+    if (qty > 0) entry.quantities.add(qty);
+    if (row?.active) entry.active += 1;
+    groups.set(productId, entry);
+  }
+  const scored = [...groups.values()].map(entry => {
+    const exact = [...entry.skus].filter(sku => known.has(sku)).length;
+    const reconSku = [...entry.skus].filter(sku => sku.startsWith('RW-BAC-')).length;
+    const q = entry.quantities;
+    const structure = (q.has(1)?4:0)+(q.has(5)?2:0)+(q.has(10)?2:0)+(q.has(25)?4:0);
+    return { ...entry, score:(exact*20)+(reconSku*5)+structure+Math.min(entry.active,4) };
+  }).sort((a,b)=>b.score-a.score || b.skus.size-a.skus.size || a.productId.localeCompare(b.productId));
+  if (!scored.length || scored[0].score <= 0) return null;
+  return scored[0].productId;
+}
+
+async function bindReconInventoryProduct(db, productId) {
+  if (!productId) return;
+  const { error } = await db.rpc('recon_bind_inventory_product', { p_product_id: productId });
+  if (error && !isMissingFunction(error) && !isMissingRelation(error)) throw error;
+}
+
 async function findReconProduct(db) {
-  // Prefer the batch inventory configuration because it already points at the
-  // exact parent product and does not depend on optional catalogue columns.
-  // This also keeps Lot Inventory tied to the same product it is managing.
+  // 1) Explicit deployment configuration always wins.
   const configuredId = String(process.env.RECON_PRODUCT_ID || '').trim();
   if (configuredId) {
-    const { data, error } = await db.from('products').select('*').eq('id', configuredId).maybeSingle();
-    if (error) throw error;
-    if (data) return data;
+    const product = await fetchProductById(db, configuredId);
+    if (product) { await bindReconInventoryProduct(db, product.id); return product; }
   }
 
+  // 2) Existing batch config is authoritative when already bound.
   const { data: inventoryConfigs, error: configError } = await db
     .from('recon_inventory_config')
-    .select('product_id')
+    .select('product_id,enabled,updated_at')
+    .not('product_id','is',null)
+    .order('enabled',{ascending:false})
+    .order('updated_at',{ascending:false})
     .limit(10);
   if (!configError && inventoryConfigs?.length) {
-    // A Recon Water deployment should normally have one configured product.
-    // Prefer an enabled row when multiple historical rows exist.
-    let productId = inventoryConfigs[0]?.product_id;
-    if (inventoryConfigs.length > 1) {
-      const { data: detailedConfigs } = await db
-        .from('recon_inventory_config')
-        .select('product_id,enabled,updated_at')
-        .order('enabled', { ascending: false })
-        .order('updated_at', { ascending: false })
-        .limit(1);
-      productId = detailedConfigs?.[0]?.product_id || productId;
+    for (const row of inventoryConfigs) {
+      const product = await fetchProductById(db, row.product_id);
+      if (product) { await bindReconInventoryProduct(db, product.id); return product; }
     }
-    if (productId) {
-      const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
-      if (error) throw error;
-      if (data) return data;
-    }
-  } else if (configError && !isMissingRelation(configError) && !isSchemaShapeError(configError)) {
+  } else if (configError && !isMissingRelation(configError) && String(configError?.code || '') !== 'PGRST204') {
     throw configError;
   }
-  // A partially-installed batch table can exist with an older column shape. In
-  // that case, continue with product discovery so inventory-admin can return a
-  // precise schema_mismatch diagnostic instead of failing before the check.
 
-  // Schema-tolerant fallback for a fresh install before the batch config row is
-  // created. Read existing columns only; never require products.slug.
+  // 3) Resolve from the exact live storefront SKU family. This is the stable
+  // identifier in this project; product names/slugs are not used for binding.
+  const knownSkus = ['RW-BAC-01','RW-BAC-05','RW-BAC-10','RW-BAC-25'];
+  const { data: exactVariants, error: exactError } = await db.from('product_variants')
+    .select('product_id,sku,package_quantity,active')
+    .eq('market','domestic')
+    .in('sku',knownSkus)
+    .limit(100);
+  if (exactError) throw exactError;
+  let productId = chooseReconProductId(exactVariants || []);
+
+  // 4) Compatibility fallback for a renamed RW-BAC SKU while retaining the
+  // package structure used by this storefront.
+  if (!productId) {
+    const { data: domesticVariants, error: variantError } = await db.from('product_variants')
+      .select('product_id,sku,package_quantity,active')
+      .eq('market','domestic')
+      .limit(1000);
+    if (variantError) throw variantError;
+    productId = chooseReconProductId(domesticVariants || []);
+  }
+
+  if (productId) {
+    const product = await fetchProductById(db, productId);
+    if (product) { await bindReconInventoryProduct(db, product.id); return product; }
+  }
+
+  // 5) Last-resort human-readable lookup. This is never the primary binding.
   const { data: products, error } = await db.from('products').select('*').limit(500);
   if (error) throw error;
-  const rows = (products || []).filter(row => row && row.id);
-  const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim().toLowerCase();
-  const bySlug = configuredSlug
-    ? rows.find(row => String(row.slug || '').trim().toLowerCase() === configuredSlug)
-    : null;
-  if (bySlug) return bySlug;
-
-  const byName = rows.find(row => {
-    const name = String(row.name || '').toLowerCase();
+  const byName = (products || []).find(row => {
+    const name = String(row?.name || '').toLowerCase();
     return name.includes('bacteriostatic') && name.includes('water');
   });
-  if (byName) return byName;
+  if (byName) { await bindReconInventoryProduct(db, byName.id); return byName; }
 
-  throw new Error('Recon Water product was not found. Set RECON_PRODUCT_ID in Netlify to the product UUID used by Lot Inventory.');
+  throw new Error('Recon Water product could not be resolved from the live RW-BAC variants.');
 }
 
 function packageCode(qty) {
@@ -388,8 +391,6 @@ export async function handler(event) {
       if (!batch.installed) {
         return json(200, {
           installed: false,
-          schema_status: batch.schema_status || 'unknown',
-          schema_error: batch.schema_error || null,
           enabled: false,
           product,
           config: null,
@@ -400,6 +401,7 @@ export async function handler(event) {
           packageAvailability: {},
           diagnostics: {
             ...database,
+            missing_relation: 'public.recon_inventory_config',
             installer: 'supabase/013_repair_batch_inventory_schema.sql'
           }
         });
@@ -407,7 +409,7 @@ export async function handler(event) {
       const catalogue = await loadCatalogue(db, true);
       const summary = batchSummary(batch.lots);
       const packageAvailability = Object.fromEntries((catalogue.packages || []).map(p => [p.id, p.available_packs]));
-      return json(200, { installed: true, schema_status: 'ready', product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability, diagnostics: database });
+      return json(200, { installed: true, product, enabled: batch.enabled, config: batch.config, lots: batch.lots, movements: batch.movements, summary, packages: catalogue.packages, packageAvailability, diagnostics: database });
     }
 
     let body = {};
