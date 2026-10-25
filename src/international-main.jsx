@@ -38,7 +38,6 @@ function InternationalOrders() {
   const [status, setStatus] = useState({ busy: false, message: '', ok: false });
 
   const productSubtotal = qty * 20;
-  const orderTotal = productSubtotal + 30;
   const patch = (key, value) => {
     setForm(current => ({ ...current, [key]: value }));
     if (key === 'email' && referral) { setReferral(null); setReferralStatus({ busy: false, message: 'Reapply the referral code after changing your email.', error: false }); }
@@ -89,7 +88,7 @@ function InternationalOrders() {
     <div className="trustbar"><div className="container trustbar-inner">
       <span><Icon name="shield" size={14}/> International order portal</span><span className="trustbar-sep">•</span>
       <span>Maximum 5 vials</span><span className="trustbar-sep">•</span>
-      <span><Icon name="truck" size={15}/> $30 USD flat delivery</span>
+      <span><Icon name="truck" size={15}/> Shipping quoted separately</span>
     </div></div>
 
     <SiteHeader active="international" cartCount={0} cartHref="/" />
@@ -103,7 +102,7 @@ function InternationalOrders() {
           <div className="international-rules">
             <div><strong>$20 USD</strong><span>per vial</span></div>
             <div><strong>1–5</strong><span>vials maximum</span></div>
-            <div><strong>$30 USD</strong><span>flat delivery</span></div>
+            <div><strong>Pending</strong><span>shipping carrier</span></div>
           </div>
           <div className="international-note"><Icon name="info" size={18}/><span>Canadian addresses must use the Canadian storefront. International availability is reviewed before fulfillment. Do not send crypto before receiving order-specific payment instructions.</span></div>
           <a className="international-return-link" href="/"><Icon name="arrowLeft" size={16}/> Return to Canadian storefront</a>
@@ -112,7 +111,7 @@ function InternationalOrders() {
         <form className="international-card" onSubmit={submit}>
           <div className="international-card-head"><div><span>INTERNATIONAL REQUEST</span><h2>Bacteriostatic Water · 30 mL</h2></div><Icon name="truck" size={22}/></div>
           <div className="intl-qty-row"><div><span>Quantity</span><small>Maximum 5 vials</small></div><div className="intl-stepper"><button type="button" onClick={()=>setQty(q=>Math.max(1,q-1))} aria-label="Decrease international quantity">−</button><strong>{qty}</strong><button type="button" onClick={()=>setQty(q=>Math.min(5,q+1))} aria-label="Increase international quantity">+</button></div></div>
-          <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(productSubtotal)} USD</strong></div><div><span>Flat delivery</span><strong>$30.00 USD</strong></div><div className="intl-total-row"><span>Order total</span><strong>${money(orderTotal)} USD</strong></div></div><div className="intl-payment-rail"><div><span>PAYMENT METHOD</span><strong>USDC · Ethereum</strong></div><p>Payment is requested only after review. Send USDC on Ethereum mainnet (ERC-20) only; the wallet address and exact amount are provided with the approved order.</p></div>
+          <div className="intl-summary"><div><span>Product subtotal</span><strong>${money(productSubtotal)} USD</strong></div><div><span>Shipping</span><strong>Not yet quoted</strong></div><div className="intl-total-row"><span>Final total</span><strong>Pending shipping</strong></div></div><div className="intl-payment-rail"><div><span>PAYMENT METHOD</span><strong>USDC · Ethereum</strong></div><p>Payment is requested only after review. Send USDC on Ethereum mainnet (ERC-20) only; the wallet address and exact amount are provided with the approved order.</p></div>
           <div className="intl-referral-box">
             <div className="intl-referral-copy"><span>REFERRED BY SOMEONE?</span><p>Enter their referral code. International pricing does not change; the referrer receives a one-time 5% Canadian-store reward code after your order is fulfilled.</p></div>
             <div className="intl-referral-control">
@@ -132,8 +131,8 @@ function InternationalOrders() {
             <label className="full"><span>Order note (optional)</span><textarea maxLength="500" value={form.notes} onChange={e=>patch('notes',e.target.value)}/></label>
           </div>
           {status.message&&<div className={`intl-status ${status.ok?'ok':'error'}`} role="status">{status.message}</div>}
-          <button className="intl-submit" disabled={status.busy}>{status.busy?'Submitting…':`Submit international request · ${money(orderTotal)} USD`}<Icon name="chevron" size={17}/></button>
-          <p className="intl-disclaimer">Do not send USDC before approval. International orders use USDC on Ethereum after review; product and delivery are both charged in USD.</p>
+          <button className="intl-submit" disabled title="International automated shipping is not yet configured">International checkout temporarily unavailable</button>
+          <p className="intl-disclaimer">The previous flat delivery charge has been removed. International checkout will reopen when a compatible live-rate carrier is connected.</p>
         </form>
       </div></section>
     </main>

@@ -1,574 +1,279 @@
 import { createClient } from '@supabase/supabase-js';
-import { chitChatsConfigured, getChitChatsRates } from './_chitchats.mjs';
+import { chitChatsConfigured, chitChatsEnvironment, getChitChatsRates } from './_chitchats.mjs';
 
 const json = (statusCode, body) => ({
   statusCode,
-  headers: {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-  },
+  headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   body: JSON.stringify(body),
 });
 
-
-const normalizePromoCode = value => String(value || '').trim().toUpperCase();
-const promoDiscount = (promo, subtotal) => {
-  const base = Math.max(0, Number(subtotal || 0));
-  if (promo.discount_type === 'percentage') return Math.min(base, Math.floor(base * Number(promo.discount_value) / 100));
-  return Math.min(base, Number(promo.discount_value || 0));
-};
-async function validateDomesticPromo(db, rawCode, subtotalCents) {
-  const code = normalizePromoCode(rawCode);
-  if (!/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) return null;
-  const { data: promo, error } = await db.from('promo_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
-  if (error) throw error;
-  const today = new Date().toISOString().slice(0, 10);
-  if (!promo || (promo.starts_on && promo.starts_on > today) || (promo.ends_on && promo.ends_on < today) ||
-      (promo.max_uses != null && Number(promo.uses_count || 0) >= Number(promo.max_uses)) ||
-      Number(subtotalCents || 0) < Number(promo.min_subtotal_cents || 0)) return null;
-  const discount = promoDiscount(promo, subtotalCents);
-  if (discount <= 0) return null;
-  return { promo, discount, final: Math.max(0, Number(subtotalCents) - discount) };
-}
-
-const normalizeReferralCode = value => String(value || '').trim().toUpperCase();
-const referralCodeValid = code => /^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code);
-async function loadReferral(db, rawCode) {
-  const code = normalizeReferralCode(rawCode);
-  if (!referralCodeValid(code)) return null;
-  const { data, error } = await db.from('referral_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
-async function validateReferralAttribution(db, rawCode, customerEmail = '') {
-  const referral = await loadReferral(db, rawCode);
-  if (!referral) return null;
-  const email = String(customerEmail || '').trim().toLowerCase();
-  if (email && email === String(referral.referrer_email || '').trim().toLowerCase()) return null;
-  return referral;
-}
-async function validateReferralReward(db, rawCode, customerEmail, eligibleSubtotalCents) {
-  const code = normalizeReferralCode(rawCode);
-  if (!referralCodeValid(code)) return null;
-  const { data: reward, error } = await db.from('referral_rewards').select('*')
-    .eq('reward_code', code).is('redeemed_order_id', null).maybeSingle();
-  if (error) throw error;
-  if (!reward) return null;
-  const { data: referral, error: referralError } = await db.from('referral_codes').select('*')
-    .eq('id', reward.referral_id).eq('active', true).maybeSingle();
-  if (referralError) throw referralError;
-  if (!referral) return null;
-  const email = String(customerEmail || '').trim().toLowerCase();
-  if (email && email !== String(referral.referrer_email || '').trim().toLowerCase()) return null;
-  const base = Math.max(0, Number(eligibleSubtotalCents || 0));
-  const discount = Math.min(base, Math.floor(base * 0.05));
-  if (discount <= 0) return null;
-  return { referral, reward, discount, final: Math.max(0, base - discount) };
-}
-
-function getAdminClient() {
+function dbClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error('Supabase server environment is not configured.');
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-function getBearer(event) {
-  const header = event.headers?.authorization || event.headers?.Authorization || '';
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+const normalizeCode = value => String(value || '').trim().toUpperCase();
+const validCode = value => /^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(normalizeCode(value));
+const cents = value => Math.round(Number(value || 0) * 100);
+
+async function findReconProduct(db) {
+  const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim();
+  if (configuredSlug) {
+    const { data, error } = await db.from('products').select('id,slug,name,image_path,active,published_domestic,published_international').eq('slug', configuredSlug).eq('active', true).maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+  }
+  const { data, error } = await db.from('products')
+    .select('id,slug,name,image_path,active,published_domestic,published_international')
+    .eq('active', true)
+    .ilike('name', '%Bacteriostatic%Water%')
+    .order('sort_order', { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  if (!data?.length) throw new Error('Recon Water bacteriostatic-water product was not found. Set RECON_PRODUCT_SLUG in Netlify if the product uses a different name.');
+  return data[0];
 }
 
-async function requireAdmin(db, event) {
-  const token = getBearer(event);
-  if (!token) return { error: 'Authentication required.', status: 401 };
-
-  const { data: authData, error: authError } = await db.auth.getUser(token);
-  const user = authData?.user;
-  if (authError || !user) return { error: 'Invalid or expired session.', status: 401 };
-
-  // Recon Water's earlier backend used public.admin_users. The check is tolerant of
-  // the historical user_id/id/email shapes so this rebuild does not create a second admin system.
-  const { data: adminRows, error: adminError } = await db.from('admin_users').select('*').limit(250);
-  if (adminError) return { error: 'Admin authorization table is unavailable.', status: 500 };
-
-  const allowed = (adminRows || []).some(row =>
-    row.user_id === user.id || row.id === user.id ||
-    (row.email && user.email && String(row.email).toLowerCase() === String(user.email).toLowerCase())
-  );
-  if (!allowed) return { error: 'Admin access required.', status: 403 };
-  return { user };
+function packageCode(qty) {
+  if (qty === 1) return 'single';
+  if (qty === 5) return 'five';
+  if (qty === 10) return 'ten';
+  if (qty === 25) return 'case';
+  return `qty-${qty}`;
 }
-
-function packageAvailability(pack, lots) {
-  const eligible = (lots || []).filter(lot => lot.status === 'available' && lot.expiry_date && new Date(`${lot.expiry_date}T23:59:59Z`) > new Date());
-  if (pack.stock_kind === 'sealed') {
-    return eligible.reduce((sum, lot) => sum + Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)), 0);
-  }
-  if (Number(pack.vials_per_pack) > 1) {
-    return eligible.reduce((sum, lot) => {
-      const free = Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0));
-      return sum + Math.floor(free / Number(pack.vials_per_pack));
-    }, 0);
-  }
-  return eligible.reduce((sum, lot) => sum + Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)), 0);
-}
-
-
-async function loadShippingProfile(db, packageId) {
-  const { data, error } = await db.from('shipping_profiles').select('*').eq('package_id', packageId).eq('active', true).maybeSingle();
-  if (error) {
-    if (error.code === '42P01' || error.code === '42703') return null;
-    throw error;
-  }
-  return data || null;
-}
-
-async function shippingQuote(db, { market, packageId, recipient, valueCents, sku }) {
-  const domesticFallback = { live: false, amount_cents: 0, currency: 'CAD', service_code: null, service_name: 'Delivery confirmed after review', estimate: '', cad_amount_cents: null };
-  const internationalFallback = { live: false, amount_cents: 3000, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery', estimate: '', cad_amount_cents: null };
-  // Chit Chats currently prohibits medicine/DIN goods from cross-border and international shipment.
-  // Recon Water therefore uses Chit Chats live rating only for Canadian orders.
-  if (market !== 'domestic') return { configured: false, profile_ready: false, rates: [], fallback: internationalFallback };
-  if (!chitChatsConfigured()) return { configured: false, profile_ready: false, rates: [], fallback: domesticFallback };
-  const profile = await loadShippingProfile(db, packageId);
-  if (!profile) return { configured: true, profile_ready: false, rates: [], fallback: domesticFallback };
-  try {
-    const rates = await getChitChatsRates({ profile, recipient, valueCents, sku });
-    return { configured: true, profile_ready: true, rates, fallback: domesticFallback };
-  } catch (error) {
-    return { configured: true, profile_ready: true, rates: [], fallback: domesticFallback, live_error: String(error?.message || 'Live Chit Chats rates are temporarily unavailable') };
-  }
-}
-
-function selectedShippingRate(quote, serviceCode, expectedCents) {
-  if (!quote?.rates?.length) return quote?.fallback || null;
-  const selected = quote.rates.find(rate => rate.service_code === String(serviceCode || ''));
-  if (!selected) throw new Error('Select an available shipping service');
-  if (Number.isInteger(Number(expectedCents)) && Number(expectedCents) !== Number(selected.amount_cents)) {
-    throw new Error('Shipping rate changed. Review the updated delivery price before submitting');
-  }
-  return { ...selected, live: true };
+function packageLabel(variant) {
+  const label = String(variant.package_type || '').trim();
+  if (label) return label;
+  const q = Number(variant.package_quantity || 1);
+  return q === 1 ? 'Single vial' : `${q}-vial pack`;
 }
 
 async function loadCatalogue(db, includeInactive = false) {
-  const { data: product, error: productError } = await db
-    .from('products')
-    .select('id,sku,name,is_active')
-    .eq('sku', 'BW-30ML')
-    .maybeSingle();
-  if (productError) throw productError;
-  if (!product) throw new Error('Recon Water product BW-30ML was not found.');
+  const product = await findReconProduct(db);
+  let q = db.from('product_variants')
+    .select('id,product_id,market,sku,strength,package_type,package_quantity,currency,price,active,metadata,fulfillment_policy,inventory_pool_variant_id,updated_at')
+    .eq('product_id', product.id)
+    .eq('market', 'domestic')
+    .order('package_quantity', { ascending: true });
+  if (!includeInactive) q = q.eq('active', true).gt('price', 0);
+  const { data: variants, error } = await q;
+  if (error) throw error;
+  const ids = [...new Set((variants || []).flatMap(v => [v.id, v.inventory_pool_variant_id]).filter(Boolean))];
+  const { data: inventory, error: invError } = ids.length
+    ? await db.from('inventory').select('variant_id,on_hand,reserved,incoming_quantity,incoming_eta,inventory_note,updated_at').in('variant_id', ids)
+    : { data: [], error: null };
+  if (invError) throw invError;
+  const inv = new Map((inventory || []).map(row => [row.variant_id, row]));
+  const packages = (variants || []).map(v => {
+    const sourceId = v.inventory_pool_variant_id || v.id;
+    const row = inv.get(sourceId);
+    const free = row ? Math.max(0, Number(row.on_hand || 0) - Number(row.reserved || 0)) : 0;
+    const packQty = Math.max(1, Number(v.package_quantity || 1));
+    const sharedPool = !!v.inventory_pool_variant_id && v.inventory_pool_variant_id !== v.id;
+    const available = v.fulfillment_policy === 'unlimited' ? 999999 : sharedPool ? Math.floor(free / packQty) : free;
+    return {
+      id: v.id,
+      product_id: v.product_id,
+      code: packageCode(packQty),
+      sku: v.sku,
+      label: packageLabel(v),
+      vials_per_pack: packQty,
+      stock_kind: String(v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose',
+      price_cents: cents(v.price),
+      active: !!v.active,
+      max_per_request: 100,
+      available_packs: available,
+      currency: String(v.currency || 'CAD').trim(),
+      fulfillment_policy: v.fulfillment_policy,
+      incoming_quantity: Number(row?.incoming_quantity || 0),
+      incoming_eta: row?.incoming_eta || null,
+    };
+  });
+  return { product, packages, lots: [] };
+}
 
-  let packageQuery = db
-    .from('product_packages')
-    .select('id,product_id,code,sku,label,vials_per_pack,stock_kind,price_cents,active,max_per_request,updated_at')
-    .eq('product_id', product.id);
-  if (!includeInactive) packageQuery = packageQuery.eq('active', true).not('price_cents', 'is', null);
+async function loadVariant(db, id, market = 'domestic') {
+  const { data, error } = await db.from('product_variants')
+    .select('id,product_id,market,sku,package_type,package_quantity,currency,price,active,metadata,fulfillment_policy,inventory_pool_variant_id')
+    .eq('id', id).eq('market', market).eq('active', true).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
 
-  const [{ data: packages, error: packageError }, { data: lots, error: lotError }] = await Promise.all([
-    packageQuery,
-    db.from('inventory_lots').select('id,product_id,lot_code,expiry_date,status,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved,location,updated_at').eq('product_id', product.id),
-  ]);
-  if (packageError) throw packageError;
-  if (lotError) throw lotError;
+async function validatePromo(db, rawCode, subtotal) {
+  const code = normalizeCode(rawCode);
+  if (!validCode(code)) return null;
+  const { data, error } = await db.rpc('validate_promo_code', { p_code: code, p_market: 'domestic', p_subtotal: Number(subtotal) });
+  if (error) throw error;
+  if (!data || !data.valid) return null;
+  return {
+    code: String(data.code || code).toUpperCase(),
+    discount: Number(data.discount || 0),
+    total: Number(data.total ?? (Number(subtotal) - Number(data.discount || 0))),
+  };
+}
 
-  const order = { single: 1, five: 2, ten: 3, case: 4 };
-  const normalized = (packages || [])
-    .sort((a, b) => (order[a.code] || 99) - (order[b.code] || 99))
-    .map(pack => ({ ...pack, available_packs: packageAvailability(pack, lots || []) }));
+async function loadReferral(db, rawCode) {
+  const code = normalizeCode(rawCode);
+  if (!validCode(code)) return null;
+  const { data, error } = await db.from('referral_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
 
-  return { product, packages: normalized, lots: lots || [] };
+async function validateReferralAttribution(db, rawCode, email) {
+  const ref = await loadReferral(db, rawCode);
+  if (!ref) return null;
+  if (String(ref.referrer_email || '').trim().toLowerCase() === String(email || '').trim().toLowerCase()) return null;
+  return ref;
+}
+
+async function validateReferralReward(db, rawCode, email, subtotalAfterPromo) {
+  const code = normalizeCode(rawCode);
+  if (!validCode(code)) return null;
+  const { data: reward, error } = await db.from('referral_rewards').select('*').eq('reward_code', code).is('redeemed_order_id', null).maybeSingle();
+  if (error) throw error;
+  if (!reward) return null;
+  const { data: ref, error: refError } = await db.from('referral_codes').select('*').eq('id', reward.referral_id).eq('active', true).maybeSingle();
+  if (refError) throw refError;
+  if (!ref || String(ref.referrer_email || '').trim().toLowerCase() !== String(email || '').trim().toLowerCase()) return null;
+  const discount = Math.round(Math.max(0, Number(subtotalAfterPromo || 0)) * 0.05 * 100) / 100;
+  return discount > 0 ? { reward, ref, discount } : null;
+}
+
+function validCanadianAddress(shipping) {
+  if (!shipping || typeof shipping !== 'object' || Array.isArray(shipping)) return false;
+  const region = String(shipping.region || '').trim().toUpperCase();
+  const postal = String(shipping.postal || '').trim().toUpperCase();
+  const regions = new Set(['AB','BC','MB','NB','NL','NT','NS','NU','ON','PE','QC','SK','YT']);
+  return String(shipping.address || '').trim().length >= 5 && String(shipping.city || '').trim().length >= 2 && regions.has(region) && /^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ ]?\d[A-CEGHJ-NPRSTV-Z]\d$/.test(postal) && String(shipping.country || '').trim().toLowerCase() === 'canada';
+}
+
+async function getProfile(db, variantId) {
+  const { data, error } = await db.from('shipping_profiles').select('*').eq('variant_id', variantId).maybeSingle();
+  if (error) throw error;
+  return data || null;
 }
 
 export async function handler(event) {
   if (event.httpMethod === 'OPTIONS') return json(204, {});
-
   let db;
-  try { db = getAdminClient(); }
-  catch (error) { return json(503, { error: error.message }); }
-
+  try { db = dbClient(); } catch (e) { return json(503, { error: e.message }); }
   const mode = event.queryStringParameters?.mode || 'catalogue';
 
   try {
     if (event.httpMethod === 'GET' && mode === 'health') {
       const { error } = await db.from('products').select('id').limit(1);
-      return error ? json(503, { connected: false, error: error.message }) : json(200, { connected: true });
+      return error ? json(503, { connected: false, error: error.message }) : json(200, { connected: true, chitchats: chitChatsConfigured() });
     }
 
-    if (event.httpMethod === 'GET' && mode === 'catalogue') {
-      const data = await loadCatalogue(db, false);
-      return json(200, data);
-    }
+    if (event.httpMethod === 'GET' && mode === 'catalogue') return json(200, await loadCatalogue(db, false));
 
-
-    if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
-      let body;
-      try { body = JSON.parse(event.body || '{}'); }
-      catch { return json(400, { error: 'Invalid request data.' }); }
-      const market = body.market === 'international' ? 'international' : 'domestic';
-      const recipient = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, name: body.name, email: body.email } : null;
-      if (!recipient || String(recipient.name || '').trim().length < 2 || String(recipient.address || '').trim().length < 5 || String(recipient.city || '').trim().length < 2 || String(recipient.postal || '').trim().length < 2) {
-        return json(400, { error: 'Complete the delivery address to calculate shipping.' });
-      }
-      if (market === 'domestic') {
-        const packageId = String(body.package_id || '');
-        const { data: pack, error } = await db.from('product_packages').select('id,sku,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
-        if (error) throw error;
-        if (!pack || pack.price_cents == null) return json(409, { error: 'Selected package is unavailable.' });
-        const quote = await shippingQuote(db, { market, packageId, recipient: { ...recipient, country: 'Canada' }, valueCents: Number(pack.price_cents), sku: pack.sku });
-        return json(200, quote);
-      }
-      const quantity = Number(body.quantity);
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) return json(400, { error: 'International orders are limited to 1–5 vials.' });
-      return json(200, { configured: false, profile_ready: false, rates: [], fallback: { live: false, amount_cents: 3000, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery', estimate: '', cad_amount_cents: null } });
+    let body = {};
+    if (event.httpMethod === 'POST') {
+      try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request data.' }); }
     }
 
     if (event.httpMethod === 'POST' && mode === 'promo-validate') {
-      let body;
-      try { body = JSON.parse(event.body || '{}'); }
-      catch { return json(400, { error: 'Invalid request data.' }); }
-      const packageId = String(body.package_id || '');
-      const code = normalizePromoCode(body.code);
-      if (!packageId || !code) return json(400, { error: 'Enter a valid promo code.' });
-      const { data: pack, error: packError } = await db.from('product_packages')
-        .select('id,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
-      if (packError) throw packError;
-      if (!pack || pack.price_cents == null) return json(400, { error: 'Promo code could not be applied.' });
-      const result = await validateDomesticPromo(db, code, Number(pack.price_cents));
-      if (!result) return json(400, { error: 'Promo code is invalid or unavailable.' });
-      return json(200, {
-        code: result.promo.code,
-        discount_type: result.promo.discount_type,
-        discount_value: result.promo.discount_value,
-        discount_cents: result.discount,
-        subtotal_cents: Number(pack.price_cents),
-        final_subtotal_cents: result.final,
-      });
+      const variant = await loadVariant(db, String(body.package_id || ''));
+      if (!variant) return json(400, { error: 'Promo code could not be applied.' });
+      const promo = await validatePromo(db, body.code, Number(variant.price));
+      if (!promo) return json(400, { error: 'Promo code is invalid or unavailable.' });
+      return json(200, { code: promo.code, discount_cents: cents(promo.discount), subtotal_cents: cents(variant.price), final_subtotal_cents: cents(promo.total) });
     }
 
     if (event.httpMethod === 'POST' && mode === 'referral-validate') {
-      let body;
-      try { body = JSON.parse(event.body || '{}'); }
-      catch { return json(400, { error: 'Invalid request data.' }); }
       const purpose = String(body.purpose || 'attribution');
-      const code = normalizeReferralCode(body.code);
-      if (!referralCodeValid(code)) return json(400, { error: 'Referral code is invalid or unavailable.' });
       if (purpose === 'attribution') {
-        const referral = await validateReferralAttribution(db, code, body.email || '');
-        if (!referral) return json(400, { error: 'Referral code is invalid or unavailable.' });
-        return json(200, { code: referral.code, valid: true });
+        const ref = await validateReferralAttribution(db, body.code, body.email);
+        if (!ref) return json(400, { error: 'Referral code is invalid or unavailable.' });
+        return json(200, { code: ref.code, valid: true });
       }
-      if (purpose !== 'reward') return json(400, { error: 'Invalid referral request.' });
-      const packageId = String(body.package_id || '');
-      const { data: pack, error: packError } = await db.from('product_packages').select('id,price_cents,active').eq('id', packageId).eq('active', true).maybeSingle();
-      if (packError) throw packError;
-      if (!pack || pack.price_cents == null) return json(400, { error: 'Referral reward could not be applied.' });
-      const subtotal = Number(pack.price_cents);
-      const promoCode = normalizePromoCode(body.promo_code);
-      const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotal) : null;
-      if (promoCode && !promoResult) return json(409, { error: 'Promo code changed. Review your total before applying the referral reward.' });
-      const afterPromo = promoResult ? promoResult.final : subtotal;
-      const reward = await validateReferralReward(db, code, body.email || '', afterPromo);
-      if (!reward) return json(400, { error: 'Referral reward is invalid, already used, or unavailable.' });
-      return json(200, { code: reward.reward.reward_code, discount_cents: reward.discount, eligible_subtotal_cents: afterPromo, final_subtotal_cents: reward.final, rate: 5 });
+      const variant = await loadVariant(db, String(body.package_id || ''));
+      if (!variant) return json(400, { error: 'Referral reward could not be applied.' });
+      let eligible = Number(variant.price);
+      if (body.promo_code) {
+        const promo = await validatePromo(db, body.promo_code, eligible);
+        if (!promo) return json(409, { error: 'Your promo code is no longer available. Review your checkout total.' });
+        eligible = promo.total;
+      }
+      const reward = await validateReferralReward(db, body.code, body.email, eligible);
+      if (!reward) return json(400, { error: 'Referral reward is invalid, already used, or does not belong to this email.' });
+      return json(200, { code: normalizeCode(body.code), discount_cents: cents(reward.discount), final_subtotal_cents: cents(Math.max(0, eligible - reward.discount)) });
+    }
+
+    if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
+      if (String(body.market || 'domestic') !== 'domestic') return json(400, { error: 'Chit Chats live rating is available only for Canadian Recon Water orders.' });
+      if (!chitChatsConfigured()) return json(503, { error: 'Chit Chats is not configured in Netlify yet.' });
+      const variant = await loadVariant(db, String(body.package_id || ''));
+      if (!variant || String(variant.currency || '').trim().toUpperCase() !== 'CAD') return json(400, { error: 'Selected package is unavailable.' });
+      const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
+      if (!validCanadianAddress(shipping)) return json(400, { error: 'Complete a valid Canadian delivery address to calculate shipping.' });
+      const profile = await getProfile(db, variant.id);
+      if (!profile?.active) return json(409, { error: 'Live shipping is not configured for this package yet.' });
+      const recipient = { ...shipping, name: String(body.name || '').trim(), email: String(body.email || '').trim() };
+      const rawRates = await getChitChatsRates({ profile, recipient, valueCents: cents(variant.price), sku: variant.sku });
+      const items = [{ variant_id: variant.id, quantity: 1 }];
+      const rates = [];
+      for (const rate of rawRates) {
+        const { data: quoteId, error } = await db.rpc('recon_store_shipping_quote', {
+          p_shipping_address: shipping,
+          p_market: 'domestic',
+          p_items: items,
+          p_service_code: rate.service_code,
+          p_service_name: rate.service_name,
+          p_amount: Number(rate.amount_cents) / 100,
+          p_currency: 'CAD',
+          p_estimate: rate.estimate || null,
+          p_provider_payload: rate,
+          p_ttl_minutes: 15,
+        });
+        if (error) throw error;
+        rates.push({ ...rate, quote_id: quoteId });
+      }
+      return json(200, { configured: true, environment: chitChatsEnvironment(), rates });
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
-      let body;
-      try { body = JSON.parse(event.body || '{}'); }
-      catch { return json(400, { error: 'Invalid request data.' }); }
-
       const name = String(body.name || '').trim();
       const email = String(body.email || '').trim();
-      const notes = String(body.notes || '');
-      const packageId = String(body.package_id || '');
-      const promoCode = normalizePromoCode(body.promo_code);
-      const referralCode = normalizeReferralCode(body.referral_code);
-      const referralRewardCode = normalizeReferralCode(body.referral_reward_code);
-      const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
-      const shippingServiceCode = String(body.shipping_service_code || '');
-      const expectedShippingCents = body.expected_shipping_cents == null ? null : Number(body.expected_shipping_cents);
-      if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 1000 || !packageId) {
-        return json(400, { error: 'Invalid customer details.' });
-      }
-      if (!shipping) return json(400, { error: 'A complete Canadian delivery address is required.' });
-      const address = String(shipping.address || '').trim();
-      const city = String(shipping.city || '').trim();
-      const region = String(shipping.region || '').trim().toUpperCase();
-      const postal = String(shipping.postal || '').trim().toUpperCase();
-      const country = String(shipping.country || '').trim();
-      const regions = new Set(['AB','BC','MB','NB','NL','NT','NS','NU','ON','PE','QC','SK','YT']);
-      if (address.length < 5 || city.length < 2 || !regions.has(region) || !/^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ ]?\d[A-CEGHJ-NPRSTV-Z]\d$/.test(postal) || country.toLowerCase() !== 'canada' || JSON.stringify(shipping).length > 1200) {
-        return json(400, { error: 'A valid Canadian delivery address is required.' });
-      }
-
-      const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const { count: recentCount, error: recentError } = await db.from('orders').select('id', { count: 'exact', head: true }).eq('market', 'domestic').ilike('customer_email', email).gt('created_at', recentCutoff);
-      if (recentError) throw recentError;
-      if (Number(recentCount || 0) >= 3) return json(429, { error: 'Too many recent requests.' });
-
-      const { data: pack, error: packError } = await db.from('product_packages').select('id,product_id,code,sku,label,vials_per_pack,stock_kind,price_cents,active,max_per_request').eq('id', packageId).eq('active', true).maybeSingle();
-      if (packError) throw packError;
-      if (!pack || pack.price_cents == null) return json(409, { error: 'Selected package is unavailable.' });
-      const { data: product, error: productError } = await db.from('products').select('id,name,is_active').eq('id', pack.product_id).eq('is_active', true).maybeSingle();
-      if (productError) throw productError;
-      if (!product) return json(409, { error: 'Product unavailable.' });
-      const { data: lots, error: lotsError } = await db.from('inventory_lots').select('id,product_id,expiry_date,status,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved').eq('product_id', product.id);
-      if (lotsError) throw lotsError;
-      if (packageAvailability(pack, lots || []) < 1) return json(409, { error: 'Insufficient inventory for selected package.' });
-
-      const subtotalCents = Number(pack.price_cents);
-      const promoResult = promoCode ? await validateDomesticPromo(db, promoCode, subtotalCents) : null;
-      if (promoCode && !promoResult) return json(409, { error: 'Promo code is invalid or unavailable. Review your total before submitting.' });
-      const referral = referralCode ? await validateReferralAttribution(db, referralCode, email) : null;
-      if (referralCode && !referral) return json(409, { error: 'Referral code is invalid or cannot be used for this order.' });
-      const afterPromoCents = promoResult ? promoResult.final : subtotalCents;
-      const referralReward = referralRewardCode ? await validateReferralReward(db, referralRewardCode, email, afterPromoCents) : null;
-      if (referralRewardCode && !referralReward) return json(409, { error: 'Referral reward is invalid, already used, or does not belong to this email. Review your total before submitting.' });
-      const shippingQuoteResult = await shippingQuote(db, {
-        market: 'domestic', packageId: pack.id,
-        recipient: { name, email, address, city, region, postal, country: 'Canada' },
-        valueCents: subtotalCents, sku: pack.sku,
+      const variant = await loadVariant(db, String(body.package_id || ''));
+      if (!variant) return json(409, { error: 'Selected package is unavailable.' });
+      if (name.length < 2 || !email.includes('@')) return json(400, { error: 'Enter valid customer details.' });
+      const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
+      if (!validCanadianAddress(shipping)) return json(400, { error: 'A complete Canadian delivery address is required.' });
+      const quoteId = String(body.shipping_quote_id || '').trim();
+      const expectedShippingCents = Number(body.expected_shipping_cents);
+      if (!quoteId || !Number.isInteger(expectedShippingCents) || expectedShippingCents <= 0) return json(409, { error: 'Choose a current Chit Chats shipping service before submitting.' });
+      const idempotency = body.idempotency_key || crypto.randomUUID();
+      const address = { ...shipping, shipping_quote_id: quoteId };
+      const items = [{ variant_id: variant.id, quantity: 1 }];
+      const { data, error } = await db.rpc('recon_create_order_v1', {
+        p_idempotency_key: idempotency,
+        p_customer_name: name,
+        p_customer_email: email,
+        p_shipping_address: address,
+        p_market: 'domestic',
+        p_currency: 'CAD',
+        p_shipping_total: expectedShippingCents / 100,
+        p_items: items,
+        p_payment_method: 'etransfer',
+        p_promo_code: body.promo_code || null,
+        p_referral_code: body.referral_code || null,
+        p_referral_reward_code: body.referral_reward_code || null,
       });
-      const chosenShipping = selectedShippingRate(shippingQuoteResult, shippingServiceCode, expectedShippingCents);
-      let promoClaimed = false;
-      let rewardClaimed = false;
-      if (promoResult) {
-        const currentUses = Number(promoResult.promo.uses_count || 0);
-        const { data: claimed, error: claimError } = await db.from('promo_codes').update({ uses_count: currentUses + 1, updated_at: new Date().toISOString() }).eq('id', promoResult.promo.id).eq('uses_count', currentUses).select('id').maybeSingle();
-        if (claimError) throw claimError;
-        if (!claimed) return json(409, { error: 'Promo code is invalid or unavailable.' });
-        promoClaimed = true;
-      }
-
-      let order = null;
-      try {
-        const insert = {
-          customer_name: name,
-          customer_email: email,
-          shipping: { address, city, region, postal, country: 'Canada' },
-          notes,
-          status: 'pending_review',
-          subtotal_cents: subtotalCents,
-          market: 'domestic',
-          subtotal_currency: 'CAD',
-          shipping_cents: Number(chosenShipping?.amount_cents || 0),
-          shipping_currency: 'CAD',
-          shipping_provider: chosenShipping?.live ? 'chitchats' : 'manual',
-          shipping_service_code: chosenShipping?.service_code || null,
-          shipping_service_name: chosenShipping?.service_name || null,
-          shipping_quote_cad_cents: chosenShipping?.cad_amount_cents ?? (chosenShipping?.live ? Number(chosenShipping?.amount_cents || 0) : null),
-          shipping_estimate: chosenShipping?.estimate || null,
-          shipping_quote_at: chosenShipping?.live ? new Date().toISOString() : null,
-          payment_method: 'etransfer',
-          payment_status: 'not_requested',
-        };
-        if (promoResult) {
-          insert.promo_code = promoResult.promo.code;
-          insert.promo_discount_cents = promoResult.discount;
-          insert.promo_discount_currency = 'CAD';
-        }
-        if (referral) {
-          insert.referral_id = referral.id;
-          insert.referral_code = referral.code;
-        }
-        if (referralReward) {
-          insert.referral_reward_referral_id = referralReward.referral.id;
-          insert.referral_reward_code = referralReward.reward.reward_code;
-          insert.referral_reward_discount_cents = referralReward.discount;
-          insert.referral_reward_currency = 'CAD';
-        }
-        const { data: created, error: orderError } = await db.from('orders').insert(insert).select('id,order_number').single();
-        if (orderError) throw orderError;
-        order = created;
-        if (referralReward) {
-          const { data: claimedReward, error: rewardError } = await db.from('referral_rewards')
-            .update({ redeemed_order_id: order.id, redeemed_at: new Date().toISOString() })
-            .eq('id', referralReward.reward.id).is('redeemed_order_id', null).select('id').maybeSingle();
-          if (rewardError) throw rewardError;
-          if (!claimedReward) throw new Error('Referral reward is no longer available. Review your total before submitting.');
-          rewardClaimed = true;
-        }
-        const { error: itemError } = await db.from('order_items').insert({ order_id: order.id, product_id: product.id, product_name: product.name, sku: pack.sku, quantity: 1, unit_price_cents: subtotalCents, package_id: pack.id, package_label: pack.label, vials_per_pack: pack.vials_per_pack, stock_kind: pack.stock_kind });
-        if (itemError) throw itemError;
-      } catch (error) {
-        if (rewardClaimed && referralReward && order?.id) {
-          await db.from('referral_rewards').update({ redeemed_order_id: null, redeemed_at: null })
-            .eq('id', referralReward.reward.id).eq('redeemed_order_id', order.id);
-        }
-        if (order?.id) { await db.from('order_items').delete().eq('order_id', order.id); await db.from('orders').delete().eq('id', order.id); }
-        if (promoClaimed && promoResult) {
-          const expected = Number(promoResult.promo.uses_count || 0) + 1;
-          await db.from('promo_codes').update({ uses_count: Math.max(0, expected - 1), updated_at: new Date().toISOString() }).eq('id', promoResult.promo.id).eq('uses_count', expected);
-        }
+      if (error) {
+        const code = String(error.message || '');
+        if (/SHIPPING_QUOTE_REQUIRED|SHIPPING_QUOTE_EXPIRED|SHIPPING_CHANGED/.test(code)) return json(409, { error: 'The shipping quote changed or expired. Recalculate shipping and review the total.' });
         throw error;
       }
-      return json(200, {
-        order_id: order.id,
-        order_number: order.order_number || null,
-        promo: promoResult ? { code: promoResult.promo.code, discount_cents: promoResult.discount, final_subtotal_cents: promoResult.final } : null,
-        referral_reward: referralReward ? { code: referralReward.reward.reward_code, discount_cents: referralReward.discount, final_subtotal_cents: referralReward.final } : null,
-        shipping: chosenShipping,
-      });
+      return json(200, data || {});
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-international') {
-      let body;
-      try { body = JSON.parse(event.body || '{}'); }
-      catch { return json(400, { error: 'Invalid request data.' }); }
-
-      const quantity = Number(body.quantity);
-      const name = String(body.name || '').trim();
-      const email = String(body.email || '').trim();
-      const notes = String(body.notes || '');
-      const referralCode = normalizeReferralCode(body.referral_code);
-      const shipping = body.shipping && typeof body.shipping === 'object' && !Array.isArray(body.shipping) ? body.shipping : null;
-
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5) {
-        return json(400, { error: 'International orders are limited to 1–5 vials.' });
-      }
-      if (name.length < 2 || name.length > 100 || email.length < 5 || email.length > 200 || !email.includes('@') || notes.length > 500) {
-        return json(400, { error: 'Invalid customer details.' });
-      }
-      if (!shipping) return json(400, { error: 'A complete international delivery address is required.' });
-
-      const address = String(shipping.address || '').trim();
-      const city = String(shipping.city || '').trim();
-      const region = String(shipping.region || '').trim();
-      const postal = String(shipping.postal || '').trim();
-      const country = String(shipping.country || '').trim();
-      if (address.length < 5 || city.length < 2 || region.length < 1 || postal.length < 2 || country.length < 2 || JSON.stringify(shipping).length > 1200) {
-        return json(400, { error: 'A complete international delivery address is required.' });
-      }
-      if (['canada', 'ca', 'can'].includes(country.toLowerCase())) {
-        return json(400, { error: 'Canadian addresses must use the domestic ordering flow.' });
-      }
-
-      const referral = referralCode ? await validateReferralAttribution(db, referralCode, email) : null;
-      if (referralCode && !referral) return json(409, { error: 'Referral code is invalid or cannot be used for this order.' });
-
-      const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const { count: recentCount, error: recentError } = await db
-        .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('market', 'international')
-        .ilike('customer_email', email)
-        .gt('created_at', recentCutoff);
-      if (recentError) throw recentError;
-      if (Number(recentCount || 0) >= 3) return json(429, { error: 'Too many recent international requests.' });
-
-      const { data: product, error: productError } = await db
-        .from('products')
-        .select('id,name')
-        .eq('sku', 'BW-30ML')
-        .eq('is_active', true)
-        .maybeSingle();
-      if (productError) throw productError;
-      if (!product) return json(409, { error: 'Product unavailable.' });
-
-      const { data: singlePack, error: packError } = await db
-        .from('product_packages')
-        .select('id')
-        .eq('product_id', product.id)
-        .eq('code', 'single')
-        .maybeSingle();
-      if (packError) throw packError;
-      if (!singlePack) return json(409, { error: 'International format unavailable.' });
-
-      const today = new Date().toISOString().slice(0, 10);
-      const { data: lots, error: lotsError } = await db
-        .from('inventory_lots')
-        .select('loose_on_hand,loose_reserved')
-        .eq('product_id', product.id)
-        .eq('status', 'available')
-        .gt('expiry_date', today);
-      if (lotsError) throw lotsError;
-      const freeLoose = (lots || []).reduce((sum, lot) => sum + Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)), 0);
-      if (freeLoose < quantity) return json(409, { error: 'Insufficient inventory for selected quantity.' });
-
-      // International product pricing stays fixed. Chit Chats is not used for this product cross-border.
-      const unitPriceCents = 2000; // USD $20.00 per vial
-      const shippingCents = 3000; // Existing international fallback rate.
-
-      const { data: order, error: orderError } = await db
-        .from('orders')
-        .insert({
-          customer_name: name,
-          customer_email: email,
-          shipping,
-          notes,
-          status: 'pending_review',
-          subtotal_cents: quantity * unitPriceCents,
-          market: 'international',
-          subtotal_currency: 'USD',
-          shipping_cents: shippingCents,
-          shipping_currency: 'USD',
-          shipping_provider: 'flat_rate',
-          shipping_service_code: 'flat_rate_fallback',
-          shipping_service_name: 'Flat delivery',
-          shipping_quote_cad_cents: null,
-          shipping_estimate: null,
-          shipping_quote_at: null,
-          payment_method: 'usdc_eth',
-          payment_status: 'not_requested',
-          referral_id: referral?.id || null,
-          referral_code: referral?.code || null,
-        })
-        .select('id,order_number')
-        .single();
-      if (orderError) throw orderError;
-
-      const { error: itemError } = await db.from('order_items').insert({
-        order_id: order.id,
-        product_id: product.id,
-        product_name: product.name,
-        sku: 'RW-INTL-BAC-01',
-        quantity,
-        unit_price_cents: unitPriceCents,
-        package_id: singlePack.id,
-        package_label: 'International single vial',
-        vials_per_pack: 1,
-        stock_kind: 'loose',
-      });
-      if (itemError) {
-        await db.from('orders').delete().eq('id', order.id);
-        throw itemError;
-      }
-
-      return json(200, { order_id: order.id, order_number: order.order_number || null, shipping: { live: false, amount_cents: shippingCents, currency: 'USD', service_code: 'flat_rate_fallback', service_name: 'Flat delivery' } });
-    }
-
-    if (event.httpMethod === 'GET' && mode === 'admin') {
-      const auth = await requireAdmin(db, event);
-      if (auth.error) return json(auth.status, { error: auth.error });
-      const catalogue = await loadCatalogue(db, true);
-      const { data: orders, error: orderError } = await db
-        .from('orders')
-        .select('id,order_number,customer_name,customer_email,status,subtotal_cents,created_at,updated_at')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (orderError) throw orderError;
-      return json(200, { ...catalogue, orders: orders || [], admin: { id: auth.user.id, email: auth.user.email } });
-    }
-
-    if (event.httpMethod === 'POST' && mode === 'set-package') {
-      const auth = await requireAdmin(db, event);
-      if (auth.error) return json(auth.status, { error: auth.error });
-      const body = JSON.parse(event.body || '{}');
-      const packageId = String(body.package_id || '');
-      const priceCents = body.price_cents == null ? null : Number(body.price_cents);
-      const active = Boolean(body.active);
-      const maxPerRequest = Number(body.max_per_request || 10);
-      if (!packageId || (priceCents != null && (!Number.isInteger(priceCents) || priceCents < 1))) return json(400, { error: 'Invalid package pricing.' });
-      const { error } = await db.rpc('service_admin_set_package_v2', {
-        p_package_id: packageId,
-        p_price_cents: priceCents,
-        p_active: active,
-        p_max_per_request: maxPerRequest,
-        p_actor: auth.user.id,
-      });
-      if (error) throw error;
-      return json(200, { ok: true });
+      return json(409, { error: 'International automated shipping is temporarily unavailable while a compatible cross-border carrier is configured. No flat-rate shipping is being charged.' });
     }
 
     return json(404, { error: 'Endpoint not found.' });
