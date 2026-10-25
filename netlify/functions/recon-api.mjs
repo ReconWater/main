@@ -204,69 +204,230 @@ async function loadCatalogue(db, includeInactive = false) {
   const product = await findReconProduct(db);
   const batch = await loadBatchState(db, product.id, false);
   const summary = batchSummary(batch.lots);
-  const { data: rawRows, error } = await db.rpc('recon_storefront_catalogue_bridge');
+
+  let q = db.from('product_packages')
+    .select('id,product_id,code,sku,label,vials_per_pack,stock_kind,price_cents,active,max_per_request,updated_at')
+    .eq('product_id', product.id)
+    .order('vials_per_pack', { ascending: true });
+  if (!includeInactive) q = q.eq('active', true).gt('price_cents', 0);
+  const { data: packagesRaw, error } = await q;
   if (error) throw error;
-  const variants = Array.isArray(rawRows) ? rawRows : [];
-  const filtered = includeInactive ? variants : variants.filter(v => v.active !== false && Number(v.price || 0) > 0);
-  const packages = filtered.map(v => {
-    const packQty = Math.max(1, Number(v.package_quantity || 1));
-    const stockKind = String(v.stock_kind || v.metadata?.stock_kind || '').toLowerCase() === 'sealed' || /case/i.test(String(v.package_type || '')) ? 'sealed' : 'loose';
-    const batchAvailable = stockKind === 'sealed' ? summary.sealed_available : Math.floor(summary.loose_available / packQty);
-    const legacyAvailable = Number.isFinite(Number(v.available_packs)) ? Math.max(0, Number(v.available_packs)) : 0;
+
+  const packages = (packagesRaw || []).map(pack => {
+    const packQty = Math.max(1, Number(pack.vials_per_pack || 1));
+    const stockKind = String(pack.stock_kind || '').toLowerCase() === 'sealed' ? 'sealed' : 'loose';
+    const batchAvailable = stockKind === 'sealed'
+      ? summary.sealed_available
+      : Math.floor(summary.loose_available / packQty);
     return {
-      id: v.id,
-      product_id: v.product_id,
-      code: v.code || packageCode(packQty),
-      sku: v.sku,
-      label: v.label || packageLabel(v),
+      id: pack.id,
+      product_id: pack.product_id,
+      code: pack.code || packageCode(packQty),
+      sku: pack.sku,
+      label: pack.label || (packQty === 1 ? 'Single vial' : `${packQty}-vial pack`),
       vials_per_pack: packQty,
       stock_kind: stockKind,
-      price_cents: cents(v.price),
-      active: v.active !== false,
-      max_per_request: Number(v.max_per_request || 100),
-      available_packs: batch.enabled ? batchAvailable : legacyAvailable,
-      currency: String(v.currency || 'CAD').trim(),
-      fulfillment_policy: v.fulfillment_policy || 'finite',
-      incoming_quantity: Number(v.incoming_quantity || 0),
-      incoming_eta: v.incoming_eta || null,
+      price_cents: Number(pack.price_cents || 0),
+      active: !!pack.active,
+      max_per_request: Number(pack.max_per_request || 100),
+      available_packs: batch.enabled ? batchAvailable : null,
+      currency: 'CAD',
+      fulfillment_policy: null,
+      incoming_quantity: 0,
+      incoming_eta: null,
     };
   });
   return { product, packages, lots: batch.enabled ? batch.lots : [], batch_inventory: { installed: batch.installed, enabled: batch.enabled, summary } };
 }
 
 async function loadVariant(db, id, market = 'domestic') {
-  const { data, error } = await db.rpc('recon_storefront_variant_bridge', {
-    p_identifier: String(id || ''),
-    p_market: String(market || 'domestic'),
-  });
+  if (market !== 'domestic') return null;
+  const key = String(id || '').trim();
+  if (!key) return null;
+  let query = db.from('product_packages')
+    .select('id,product_id,code,sku,label,vials_per_pack,stock_kind,price_cents,active,max_per_request')
+    .eq('active', true);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) {
+    query = query.eq('id', key);
+  } else {
+    const normalized = key.toUpperCase();
+    const code = key.toLowerCase();
+    query = query.or(`code.eq.${code},sku.eq.${normalized}`);
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
-  return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  if (!data || !data.price_cents) return null;
+  return {
+    id: data.id,
+    product_id: data.product_id,
+    market: 'domestic',
+    sku: data.sku,
+    package_type: data.label,
+    package_quantity: Number(data.vials_per_pack || 1),
+    currency: 'CAD',
+    price: Number(data.price_cents) / 100,
+    active: !!data.active,
+    metadata: { stock_kind: data.stock_kind },
+    fulfillment_policy: null,
+    inventory_pool_variant_id: null,
+    max_per_request: Number(data.max_per_request || 100),
+    code: data.code,
+    stock_kind: data.stock_kind,
+    price_cents: Number(data.price_cents),
+  };
+}
+
+function promoDiscountCents(promo, subtotalCents) {
+  const base = Math.max(0, Number(subtotalCents || 0));
+  if (promo.discount_type === 'percentage') {
+    return Math.min(base, Math.floor(base * Number(promo.discount_value || 0) / 100));
+  }
+  return Math.min(base, Number(promo.discount_value || 0));
 }
 
 async function validatePromo(db, rawCode, subtotal) {
   const code = normalizeCode(rawCode);
   if (!validCode(code)) return null;
-  const subtotalCents = cents(subtotal);
   const { data: promo, error } = await db.from('promo_codes').select('*').eq('code', code).eq('active', true).maybeSingle();
   if (error) throw error;
   if (!promo) return null;
   const today = new Date().toISOString().slice(0, 10);
-  if ((promo.starts_on && String(promo.starts_on) > today) || (promo.ends_on && String(promo.ends_on) < today)) return null;
-  if (promo.max_uses != null && Number(promo.uses_count || 0) >= Number(promo.max_uses)) return null;
-  if (subtotalCents < Number(promo.min_subtotal_cents || 0)) return null;
-  let discountCents = 0;
-  if (String(promo.discount_type) === 'percentage') {
-    discountCents = Math.floor(subtotalCents * Number(promo.discount_value || 0) / 100);
-  } else if (String(promo.discount_type) === 'fixed') {
-    discountCents = Number(promo.discount_value || 0);
-  }
-  discountCents = Math.max(0, Math.min(subtotalCents, Math.round(discountCents)));
+  const subtotalCents = Math.max(0, cents(subtotal));
+  if ((promo.starts_on && promo.starts_on > today) ||
+      (promo.ends_on && promo.ends_on < today) ||
+      (promo.max_uses != null && Number(promo.uses_count || 0) >= Number(promo.max_uses)) ||
+      subtotalCents < Number(promo.min_subtotal_cents || 0)) return null;
+  const discountCents = promoDiscountCents(promo, subtotalCents);
   if (discountCents <= 0) return null;
   return {
-    code: String(promo.code || code).toUpperCase(),
+    promo,
+    code,
     discount: discountCents / 100,
-    total: Math.max(0, subtotalCents - discountCents) / 100,
+    discount_cents: discountCents,
+    total: (subtotalCents - discountCents) / 100,
+    total_cents: subtotalCents - discountCents,
   };
+}
+
+async function eligiblePackageAvailability(db, variant) {
+  const today = new Date().toISOString().slice(0, 10);
+  const tables = ['recon_inventory_lots', 'inventory_lots'];
+  let lots = null;
+  for (const table of tables) {
+    const { data, error } = await db.from(table)
+      .select('status,expiry_date,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved')
+      .eq('product_id', variant.product_id);
+    if (!error) { lots = data || []; break; }
+    if (!isMissingRelation(error)) throw error;
+  }
+  if (!lots) return null;
+  const eligible = lots.filter(lot => lot.status === 'available' && lot.expiry_date && lot.expiry_date >= today);
+  if (String(variant.stock_kind || variant.metadata?.stock_kind) === 'sealed') {
+    return eligible.reduce((sum, lot) => sum + Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)), 0);
+  }
+  const q = Math.max(1, Number(variant.package_quantity || 1));
+  return eligible.reduce((sum, lot) => sum + Math.floor(Math.max(0, Number(lot.loose_on_hand || 0) - Number(lot.loose_reserved || 0)) / q), 0);
+}
+
+async function submitFlatDomesticOrder(db, body, variant, shipping) {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw Object.assign(new Error('Enter valid customer details.'), { statusCode: 400 });
+  }
+  const available = await eligiblePackageAvailability(db, variant);
+  if (available != null && available < 1) {
+    throw Object.assign(new Error('Selected package is unavailable.'), { statusCode: 409 });
+  }
+
+  const subtotalCents = Number(variant.price_cents || cents(variant.price));
+  const promoCode = normalizeCode(body.promo_code);
+  const promo = promoCode ? await validatePromo(db, promoCode, subtotalCents / 100) : null;
+  if (promoCode && !promo) {
+    throw Object.assign(new Error('Promo code is invalid or unavailable. Review your checkout total.'), { statusCode: 409 });
+  }
+
+  let promoClaimed = false;
+  if (promo?.promo) {
+    const currentUses = Number(promo.promo.uses_count || 0);
+    const { data: claimed, error: claimError } = await db.from('promo_codes')
+      .update({ uses_count: currentUses + 1, updated_at: new Date().toISOString() })
+      .eq('id', promo.promo.id).eq('uses_count', currentUses).select('id').maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) throw Object.assign(new Error('Promo code is invalid or unavailable. Review your checkout total.'), { statusCode: 409 });
+    promoClaimed = true;
+  }
+
+  let orderId = null;
+  try {
+    const { data: product, error: productError } = await db.from('products').select('id,name,is_active').eq('id', variant.product_id).maybeSingle();
+    if (productError) throw productError;
+    if (!product?.is_active) throw Object.assign(new Error('Product is unavailable.'), { statusCode: 409 });
+
+    const shippingRecord = {
+      ...shipping,
+      shipping_service_code: 'flat-25-cad',
+      shipping_service_name: 'Flat rate shipping',
+      shipping_provider: 'flat_rate',
+      shipping_rate_cents: FLAT_CANADA_RATE_CAD * 100,
+    };
+    const orderPayload = {
+      customer_name: name,
+      customer_email: email,
+      shipping: shippingRecord,
+      notes: String(body.notes || '').slice(0, 1000),
+      status: 'pending_review',
+      subtotal_cents: subtotalCents,
+      market: 'domestic',
+      subtotal_currency: 'CAD',
+      shipping_cents: FLAT_CANADA_RATE_CAD * 100,
+      shipping_currency: 'CAD',
+      payment_method: 'etransfer',
+      payment_status: 'not_requested',
+      promo_code: promo?.code || null,
+      promo_discount_cents: promo?.discount_cents || 0,
+      promo_discount_currency: promo ? 'CAD' : null,
+    };
+    const { data: order, error: orderError } = await db.from('orders').insert(orderPayload).select('id,order_number').single();
+    if (orderError) throw orderError;
+    orderId = order.id;
+
+    const { error: itemError } = await db.from('order_items').insert({
+      order_id: order.id,
+      product_id: product.id,
+      product_name: product.name,
+      sku: variant.sku,
+      quantity: 1,
+      unit_price_cents: subtotalCents,
+      package_id: variant.id,
+      package_label: variant.package_type,
+      vials_per_pack: Number(variant.package_quantity || 1),
+      stock_kind: String(variant.stock_kind || variant.metadata?.stock_kind || 'loose'),
+    });
+    if (itemError) throw itemError;
+
+    return {
+      order_id: order.id,
+      order_number: order.order_number,
+      subtotal_cents: subtotalCents,
+      promo_discount_cents: promo?.discount_cents || 0,
+      shipping_cents: FLAT_CANADA_RATE_CAD * 100,
+      total_cents: Math.max(0, subtotalCents - (promo?.discount_cents || 0)) + FLAT_CANADA_RATE_CAD * 100,
+      shipping_mode: 'flat_25',
+    };
+  } catch (error) {
+    if (orderId) {
+      await db.from('order_items').delete().eq('order_id', orderId);
+      await db.from('orders').delete().eq('id', orderId);
+    }
+    if (promoClaimed && promo?.promo) {
+      const expected = Number(promo.promo.uses_count || 0) + 1;
+      await db.from('promo_codes')
+        .update({ uses_count: Math.max(0, expected - 1), updated_at: new Date().toISOString() })
+        .eq('id', promo.promo.id).eq('uses_count', expected);
+    }
+    throw error;
+  }
 }
 
 async function loadReferral(db, rawCode) {
@@ -305,10 +466,13 @@ function validCanadianAddress(shipping) {
   return String(shipping.address || '').trim().length >= 5 && String(shipping.city || '').trim().length >= 2 && regions.has(region) && /^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ ]?\d[A-CEGHJ-NPRSTV-Z]\d$/.test(postal) && String(shipping.country || '').trim().toLowerCase() === 'canada';
 }
 
-async function getProfile(db, variantId) {
-  const { data, error } = await db.from('shipping_profiles').select('*').eq('variant_id', variantId).maybeSingle();
-  if (error) throw error;
-  return data || null;
+async function getProfile(db, packageId) {
+  let result = await db.from('shipping_profiles').select('*').eq('package_id', packageId).maybeSingle();
+  if (!result.error) return result.data || null;
+  if (!/column .*package_id|schema cache/i.test(String(result.error?.message || ''))) throw result.error;
+  result = await db.from('shipping_profiles').select('*').eq('variant_id', packageId).maybeSingle();
+  if (result.error) throw result.error;
+  return result.data || null;
 }
 
 export async function handler(event) {
@@ -372,8 +536,6 @@ export async function handler(event) {
       const value = { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD, updated_by: admin.id, updated_at: new Date().toISOString() };
       const { error } = await db.from('app_settings').upsert({ key: 'recon_shipping_mode', value, public_read: false, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
       if (error) throw error;
-      const { error: expireError } = await db.from('shipping_quotes').update({ expires_at: new Date().toISOString() }).is('consumed_at', null).gt('expires_at', new Date().toISOString());
-      if (expireError) throw expireError;
       return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
     }
 
@@ -438,7 +600,23 @@ export async function handler(event) {
     }
 
     if (event.httpMethod === 'POST' && mode === 'referral-validate') {
-      return json(410, { error: 'The referral program is temporarily unavailable while it is being upgraded.' });
+      const purpose = String(body.purpose || 'attribution');
+      if (purpose === 'attribution') {
+        const ref = await validateReferralAttribution(db, body.code, body.email);
+        if (!ref) return json(400, { error: 'Referral code is invalid or unavailable.' });
+        return json(200, { code: ref.code, valid: true });
+      }
+      const variant = await loadVariant(db, String(body.package_id || ''));
+      if (!variant) return json(400, { error: 'Referral reward could not be applied.' });
+      let eligible = Number(variant.price);
+      if (body.promo_code) {
+        const promo = await validatePromo(db, body.promo_code, eligible);
+        if (!promo) return json(409, { error: 'Your promo code is no longer available. Review your checkout total.' });
+        eligible = promo.total;
+      }
+      const reward = await validateReferralReward(db, body.code, body.email, eligible);
+      if (!reward) return json(400, { error: 'Referral reward is invalid, already used, or does not belong to this email.' });
+      return json(200, { code: normalizeCode(body.code), discount_cents: cents(reward.discount), final_subtotal_cents: cents(Math.max(0, eligible - reward.discount)) });
     }
 
     if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
@@ -448,8 +626,6 @@ export async function handler(event) {
       const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
       if (!validCanadianAddress(shipping)) return json(400, { error: 'Complete a valid Canadian delivery address to calculate shipping.' });
       const shippingMode = await getReconShippingMode(db);
-      const items = [{ variant_id: variant.id, quantity: 1 }];
-
       if (shippingMode.mode === 'flat_25') {
         const flatRate = {
           service_code: 'flat-25-cad',
@@ -458,25 +634,12 @@ export async function handler(event) {
           estimate: null,
           tracking: null,
           provider: 'flat_rate',
+          quote_id: `flat-25-cad:${variant.id}`,
         };
-        const { data: quoteId, error } = await db.rpc('recon_store_shipping_quote', {
-          p_shipping_address: shipping,
-          p_market: 'domestic',
-          p_items: items,
-          p_service_code: flatRate.service_code,
-          p_service_name: flatRate.service_name,
-          p_amount: FLAT_CANADA_RATE_CAD,
-          p_currency: 'CAD',
-          p_estimate: null,
-          p_provider_payload: { ...flatRate, admin_fallback: true },
-          p_ttl_minutes: 60,
-        });
-        if (error) throw error;
-        const { error: providerError } = await db.from('shipping_quotes').update({ provider: 'flat_rate' }).eq('id', quoteId);
-        if (providerError) throw providerError;
-        return json(200, { configured: true, mode: 'flat_25', environment: 'flat-rate', rates: [{ ...flatRate, quote_id: quoteId }] });
+        return json(200, { configured: true, mode: 'flat_25', environment: 'flat-rate', rates: [flatRate] });
       }
 
+      const items = [{ variant_id: variant.id, quantity: 1 }];
       if (!chitChatsConfigured()) return json(503, { error: 'Chit Chats is not configured in Netlify yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
       const profile = await getProfile(db, variant.id);
       if (!profile?.active) return json(409, { error: 'Live shipping is not configured for this package yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
@@ -505,17 +668,18 @@ export async function handler(event) {
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
       const name = String(body.name || '').trim();
       const email = String(body.email || '').trim();
-      const reconProduct = await findReconProduct(db);
-      const batch = await loadBatchState(db, reconProduct.id, false);
-      if (batch.enabled) {
-        const { error: syncError } = await db.rpc('recon_sync_variant_inventory', { p_product_id: reconProduct.id });
-        if (syncError) throw syncError;
-      }
       const variant = await loadVariant(db, String(body.package_id || ''));
       if (!variant) return json(409, { error: 'Selected package is unavailable.' });
       if (name.length < 2 || !email.includes('@')) return json(400, { error: 'Enter valid customer details.' });
       const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
       if (!validCanadianAddress(shipping)) return json(400, { error: 'A complete Canadian delivery address is required.' });
+
+      const shippingMode = await getReconShippingMode(db);
+      if (shippingMode.mode === 'flat_25') {
+        const result = await submitFlatDomesticOrder(db, body, variant, shipping);
+        return json(200, result);
+      }
+
       const quoteId = String(body.shipping_quote_id || '').trim();
       const expectedShippingCents = Number(body.expected_shipping_cents);
       if (!quoteId || !Number.isInteger(expectedShippingCents) || expectedShippingCents <= 0) return json(409, { error: 'Choose a current shipping service before submitting.' });
