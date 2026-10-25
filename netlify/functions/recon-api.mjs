@@ -17,6 +17,27 @@ function dbClient() {
 const normalizeCode = value => String(value || '').trim().toUpperCase();
 const validCode = value => /^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(normalizeCode(value));
 const cents = value => Math.round(Number(value || 0) * 100);
+const FLAT_CANADA_RATE_CAD = 25;
+
+async function getReconShippingMode(db) {
+  const { data, error } = await db.from('app_settings').select('value').eq('key', 'recon_shipping_mode').maybeSingle();
+  if (error) throw error;
+  const mode = String(data?.value?.mode || 'chitchats').trim().toLowerCase();
+  return { mode: mode === 'flat_25' ? 'flat_25' : 'chitchats', flat_rate_cad: FLAT_CANADA_RATE_CAD };
+}
+
+async function requireShippingAdmin(event, db) {
+  const header = String(event.headers?.authorization || event.headers?.Authorization || '');
+  const token = header.replace(/^Bearer\s+/i, '').trim();
+  if (!token) throw Object.assign(new Error('Administrator authentication required.'), { statusCode: 401 });
+  const { data: authData, error: authError } = await db.auth.getUser(token);
+  if (authError || !authData?.user?.id) throw Object.assign(new Error('Administrator session is invalid or expired.'), { statusCode: 401 });
+  const { data: profile, error } = await db.from('profiles').select('id,role,active').eq('id', authData.user.id).maybeSingle();
+  if (error) throw error;
+  const role = String(profile?.role || '').toLowerCase();
+  if (!profile?.active || !['owner','admin'].includes(role)) throw Object.assign(new Error('Administrator permission required.'), { statusCode: 403 });
+  return authData.user;
+}
 
 async function findReconProduct(db) {
   const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim();
@@ -171,9 +192,27 @@ export async function handler(event) {
 
     if (event.httpMethod === 'GET' && mode === 'catalogue') return json(200, await loadCatalogue(db, false));
 
+    if (event.httpMethod === 'GET' && mode === 'shipping-settings') {
+      await requireShippingAdmin(event, db);
+      return json(200, await getReconShippingMode(db));
+    }
+
     let body = {};
     if (event.httpMethod === 'POST') {
       try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid request data.' }); }
+    }
+
+
+    if (event.httpMethod === 'POST' && mode === 'shipping-settings-save') {
+      const admin = await requireShippingAdmin(event, db);
+      const requestedMode = String(body.mode || '').trim().toLowerCase();
+      if (!['chitchats','flat_25'].includes(requestedMode)) return json(400, { error: 'Invalid shipping mode.' });
+      const value = { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD, updated_by: admin.id, updated_at: new Date().toISOString() };
+      const { error } = await db.from('app_settings').upsert({ key: 'recon_shipping_mode', value, public_read: false, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      if (error) throw error;
+      const { error: expireError } = await db.from('shipping_quotes').update({ expires_at: new Date().toISOString() }).is('consumed_at', null).gt('expires_at', new Date().toISOString());
+      if (expireError) throw expireError;
+      return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
     }
 
     if (event.httpMethod === 'POST' && mode === 'promo-validate') {
@@ -205,17 +244,46 @@ export async function handler(event) {
     }
 
     if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
-      if (String(body.market || 'domestic') !== 'domestic') return json(400, { error: 'Chit Chats live rating is available only for Canadian Recon Water orders.' });
-      if (!chitChatsConfigured()) return json(503, { error: 'Chit Chats is not configured in Netlify yet.' });
+      if (String(body.market || 'domestic') !== 'domestic') return json(400, { error: 'Automated shipping is available only for Canadian Recon Water orders.' });
       const variant = await loadVariant(db, String(body.package_id || ''));
       if (!variant || String(variant.currency || '').trim().toUpperCase() !== 'CAD') return json(400, { error: 'Selected package is unavailable.' });
       const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
       if (!validCanadianAddress(shipping)) return json(400, { error: 'Complete a valid Canadian delivery address to calculate shipping.' });
+      const shippingMode = await getReconShippingMode(db);
+      const items = [{ variant_id: variant.id, quantity: 1 }];
+
+      if (shippingMode.mode === 'flat_25') {
+        const flatRate = {
+          service_code: 'flat-25-cad',
+          service_name: 'Flat rate shipping',
+          amount_cents: FLAT_CANADA_RATE_CAD * 100,
+          estimate: null,
+          tracking: null,
+          provider: 'flat_rate',
+        };
+        const { data: quoteId, error } = await db.rpc('recon_store_shipping_quote', {
+          p_shipping_address: shipping,
+          p_market: 'domestic',
+          p_items: items,
+          p_service_code: flatRate.service_code,
+          p_service_name: flatRate.service_name,
+          p_amount: FLAT_CANADA_RATE_CAD,
+          p_currency: 'CAD',
+          p_estimate: null,
+          p_provider_payload: { ...flatRate, admin_fallback: true },
+          p_ttl_minutes: 60,
+        });
+        if (error) throw error;
+        const { error: providerError } = await db.from('shipping_quotes').update({ provider: 'flat_rate' }).eq('id', quoteId);
+        if (providerError) throw providerError;
+        return json(200, { configured: true, mode: 'flat_25', environment: 'flat-rate', rates: [{ ...flatRate, quote_id: quoteId }] });
+      }
+
+      if (!chitChatsConfigured()) return json(503, { error: 'Chit Chats is not configured in Netlify yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
       const profile = await getProfile(db, variant.id);
-      if (!profile?.active) return json(409, { error: 'Live shipping is not configured for this package yet.' });
+      if (!profile?.active) return json(409, { error: 'Live shipping is not configured for this package yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
       const recipient = { ...shipping, name: String(body.name || '').trim(), email: String(body.email || '').trim() };
       const rawRates = await getChitChatsRates({ profile, recipient, valueCents: cents(variant.price), sku: variant.sku });
-      const items = [{ variant_id: variant.id, quantity: 1 }];
       const rates = [];
       for (const rate of rawRates) {
         const { data: quoteId, error } = await db.rpc('recon_store_shipping_quote', {
@@ -231,9 +299,9 @@ export async function handler(event) {
           p_ttl_minutes: 15,
         });
         if (error) throw error;
-        rates.push({ ...rate, quote_id: quoteId });
+        rates.push({ ...rate, provider: 'chitchats', quote_id: quoteId });
       }
-      return json(200, { configured: true, environment: chitChatsEnvironment(), rates });
+      return json(200, { configured: true, mode: 'chitchats', environment: chitChatsEnvironment(), rates });
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
@@ -246,7 +314,7 @@ export async function handler(event) {
       if (!validCanadianAddress(shipping)) return json(400, { error: 'A complete Canadian delivery address is required.' });
       const quoteId = String(body.shipping_quote_id || '').trim();
       const expectedShippingCents = Number(body.expected_shipping_cents);
-      if (!quoteId || !Number.isInteger(expectedShippingCents) || expectedShippingCents <= 0) return json(409, { error: 'Choose a current Chit Chats shipping service before submitting.' });
+      if (!quoteId || !Number.isInteger(expectedShippingCents) || expectedShippingCents <= 0) return json(409, { error: 'Choose a current shipping service before submitting.' });
       const idempotency = body.idempotency_key || crypto.randomUUID();
       const address = { ...shipping, shipping_quote_id: quoteId };
       const items = [{ variant_id: variant.id, quantity: 1 }];
@@ -279,6 +347,6 @@ export async function handler(event) {
     return json(404, { error: 'Endpoint not found.' });
   } catch (error) {
     console.error('Recon API error:', error);
-    return json(500, { error: error?.message || 'Unexpected server error.' });
+    return json(Number(error?.statusCode) || 500, { error: error?.message || 'Unexpected server error.' });
   }
 }

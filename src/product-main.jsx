@@ -63,6 +63,7 @@ function Storefront() {
   const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', address: '', city: '', region: 'ON', postal: '', notes: '' });
   const [checkoutState, setCheckoutState] = useState({ busy: false, ok: false, message: '', orderNumber: '' });
   const [shippingQuote, setShippingQuote] = useState(null);
+  const [shippingRefreshKey, setShippingRefreshKey] = useState(0);
   const [shippingRates, setShippingRates] = useState([]);
   const [selectedShipping, setSelectedShipping] = useState(null);
   const [shippingState, setShippingState] = useState({ busy: false, message: '' });
@@ -136,21 +137,21 @@ function Storefront() {
     if (!shippingAddressReady || !cart) { setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:''});return; }
     let alive = true;
     const timer = setTimeout(async () => {
-      setShippingState({busy:true,message:'Calculating live Chit Chats rates…'});
+      setShippingState({busy:true,message:'Calculating shipping rates…'});
       try {
         const result = await apiRequest('shipping-quote', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ market:'domestic', name:checkoutForm.name, email:checkoutForm.email, package_id:cart.id, shipping:{ address:checkoutForm.address, city:checkoutForm.city, region:checkoutForm.region, postal:formattedPostal, country:'Canada' } }) });
         if (!alive) return;
         const rates = Array.isArray(result.rates) ? result.rates : [];
         setShippingQuote(result);setShippingRates(rates);
         setSelectedShipping(current => rates.find(rate => rate.quote_id === current?.quote_id) || rates[0] || null);
-        setShippingState({busy:false,message:rates.length?'Live delivery rates loaded.':'No Chit Chats service is currently available for this address.'});
+        setShippingState({busy:false,message:rates.length?'Delivery rates loaded.':'No shipping service is currently available for this address.'});
       } catch (error) {
         if (!alive) return;
-        setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:error.message || 'Live shipping is temporarily unavailable.'});
+        setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:error.message || 'Shipping rates are temporarily unavailable.'});
       }
     }, 700);
     return () => { alive = false;clearTimeout(timer); };
-  }, [shippingAddressReady, cart?.id, checkoutForm.name, checkoutForm.email, checkoutForm.address, checkoutForm.city, checkoutForm.region, formattedPostal]);
+  }, [shippingAddressReady, cart?.id, checkoutForm.name, checkoutForm.email, checkoutForm.address, checkoutForm.city, checkoutForm.region, formattedPostal, shippingRefreshKey]);
   async function applyPromo(event) {
     event.preventDefault();
     if (!cart || !promoInput.trim()) return;
@@ -245,7 +246,11 @@ function Storefront() {
       setReward(null);setRewardInput('');
       setCartOpen(false);
     } catch (error) {
-      setCheckoutState({ busy: false, ok: false, message: error.message || 'Could not submit request.', orderNumber: '' });
+      const message = error.message || 'Could not submit request.';
+      if (/shipping quote|shipping service|shipping rate/i.test(message)) {
+        setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingRefreshKey(key=>key+1);
+      }
+      setCheckoutState({ busy: false, ok: false, message, orderNumber: '' });
     }
   }
 
@@ -317,7 +322,7 @@ function Storefront() {
               {promo&&<div className="checkout-discount-line"><span>Promo · {promo.code}</span><strong>−${money(cartDiscountCents/100)} CAD</strong></div>}
               {reward&&<div className="checkout-discount-line referral-reward-line"><span>Referral reward · {reward.code}</span><strong>−${money(cartRewardDiscountCents/100)} CAD</strong></div>}
               <div><span>Product total</span><strong>${money(cartTotalCents/100)} CAD</strong></div>
-              <div className="checkout-shipping-line"><span>{selectedShipping?.service_name || 'Delivery'}</span><strong>{shippingState.busy?'Calculating…':selectedShipping?`$${money(shippingChargeCents/100)} CAD`:'Select a live rate'}</strong></div>
+              <div className="checkout-shipping-line"><span>{selectedShipping?.service_name || 'Delivery'}</span><strong>{shippingState.busy?'Calculating…':selectedShipping?`$${money(shippingChargeCents/100)} CAD`:'Select a shipping rate'}</strong></div>
               <div className="checkout-final-line"><span>Order total</span><strong>{selectedShipping?`$${money(checkoutGrandTotalCents/100)} CAD`:'—'}</strong></div>
             </div>
             <div className="checkout-code-grid">
@@ -325,9 +330,9 @@ function Storefront() {
               <form className="checkout-promo-form referral-reward-form" onSubmit={applyReward}><label htmlFor="checkout-reward-code">Referral reward</label><div><input id="checkout-reward-code" value={rewardInput} onChange={e=>setRewardInput(e.target.value.toUpperCase())} placeholder="REF5-XXXXXXXX" maxLength="32" disabled={rewardState.busy}/>{reward?<button type="button" className="promo-remove" onClick={removeReward}>Remove</button>:<button type="submit" disabled={rewardState.busy||!rewardInput.trim()}>{rewardState.busy?'Checking…':'Apply 5%'}</button>}</div>{rewardState.message&&<p className={`promo-message ${rewardState.error?'is-error':'is-valid'}`} role="status">{rewardState.message}</p>}<small>Each reward code is single-use for 5% off and stacks after your promo code.</small></form>
             </div>
             <form className="checkout-referral-form" onSubmit={applyReferral}><div><label htmlFor="checkout-referral-code">Were you referred by someone?</label><small>Enter their referral code. Your order price does not change; they earn a 5% reward after your order is fulfilled.</small></div><div className="checkout-referral-control"><input id="checkout-referral-code" value={referralInput} onChange={e=>setReferralInput(e.target.value.toUpperCase())} placeholder="Referral code" maxLength="32" disabled={referralState.busy}/>{referral?<button type="button" className="promo-remove" onClick={removeReferral}>Remove</button>:<button type="submit" disabled={referralState.busy||!referralInput.trim()}>{referralState.busy?'Checking…':'Apply'}</button>}</div>{referralState.message&&<p className={`promo-message ${referralState.error?'is-error':'is-valid'}`} role="status">{referralState.message}</p>}</form>
-            <p className="checkout-price-note">Referral rewards are single-use and available only to the email registered to that referral code. Regular promo codes and one referral reward can be used together. A current Chit Chats rate is required before a Canadian order can be submitted.</p>
+            <p className="checkout-price-note">Referral rewards are single-use and available only to the email registered to that referral code. Regular promo codes and one referral reward can be used together. A current shipping rate is required before a Canadian order can be submitted.</p>
           </div>
-          <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="checkout-shipping-picker full"><div className="checkout-shipping-head"><div><span>DELIVERY</span><strong>{shippingRates.length?'Choose a Chit Chats service':'Live shipping'}</strong></div><Icon name="truck" size={20}/></div>{!shippingAddressReady?<p>Complete your delivery address to calculate shipping.</p>:shippingState.busy?<p>Calculating available Chit Chats services…</p>:shippingRates.length?<div className="checkout-shipping-options">{shippingRates.map(rate=><label key={rate.quote_id||rate.service_code} className={selectedShipping?.quote_id===rate.quote_id?'selected':''}><input type="radio" name="shipping-service" checked={selectedShipping?.quote_id===rate.quote_id} onChange={()=>setSelectedShipping(rate)}/><span><b>{rate.service_name}</b><small>{[rate.estimate,rate.tracking].filter(Boolean).join(' · ')}</small></span><strong>${money(rate.amount_cents/100)} CAD</strong></label>)}</div>:<p>{shippingState.message||'Live shipping is unavailable for this address.'}</p>}</div><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy||!selectedShipping}>{checkoutState.busy?'Submitting…':selectedShipping?<>Submit request · ${money(checkoutGrandTotalCents/100)} CAD <Icon name="chevron" size={17}/></>:'Select shipping to continue'}</button></form>
+          <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="checkout-shipping-picker full"><div className="checkout-shipping-head"><div><span>DELIVERY</span><strong>{shippingRates.length?'Choose a delivery service':'Shipping rates'}</strong></div><Icon name="truck" size={20}/></div>{!shippingAddressReady?<p>Complete your delivery address to calculate shipping.</p>:shippingState.busy?<p>Calculating available shipping services…</p>:shippingRates.length?<div className="checkout-shipping-options">{shippingRates.map(rate=><label key={rate.quote_id||rate.service_code} className={selectedShipping?.quote_id===rate.quote_id?'selected':''}><input type="radio" name="shipping-service" checked={selectedShipping?.quote_id===rate.quote_id} onChange={()=>setSelectedShipping(rate)}/><span><b>{rate.service_name}</b><small>{[rate.estimate,rate.tracking].filter(Boolean).join(' · ')}</small></span><strong>${money(rate.amount_cents/100)} CAD</strong></label>)}</div>:<p>{shippingState.message||'Shipping rates are unavailable for this address.'}</p>}</div><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy||!selectedShipping}>{checkoutState.busy?'Submitting…':selectedShipping?<>Submit request · ${money(checkoutGrandTotalCents/100)} CAD <Icon name="chevron" size={17}/></>:'Select shipping to continue'}</button></form>
         </>}
       </section>
     </div>}
