@@ -94,22 +94,29 @@ async function requireInventoryAdmin(event, db) {
 }
 
 async function loadBatchState(db, productId, includeMovements = false) {
-  const { data: config, error: configError } = await db.from('recon_inventory_config').select('*').eq('product_id', productId).maybeSingle();
-  if (configError) {
-    if (isMissingRelation(configError)) return { installed: false, enabled: false, lots: [], movements: [] };
-    throw configError;
-  }
-  const { data: lots, error: lotsError } = await db.from('recon_inventory_lots')
+  // The packaging-aware v2 inventory schema is the authoritative Recon Water
+  // ledger. Do not gate inventory on the later recon_inventory_* experiment.
+  const { data: lots, error: lotsError } = await db.from('inventory_lots')
     .select('*').eq('product_id', productId).order('expiry_date', { ascending: true }).order('created_at', { ascending: true });
-  if (lotsError) throw lotsError;
-  let movements = [];
-  if (includeMovements) {
-    const { data, error } = await db.from('recon_inventory_lot_movements')
-      .select('*').eq('product_id', productId).order('created_at', { ascending: false }).limit(120);
-    if (error) throw error;
-    movements = data || [];
+  if (lotsError) {
+    if (isMissingRelation(lotsError)) return { installed: false, enabled: false, lots: [], movements: [] };
+    throw lotsError;
   }
-  return { installed: true, enabled: !!config?.enabled, config: config || null, lots: lots || [], movements };
+
+  let movements = [];
+  if (includeMovements && (lots || []).length) {
+    const lotIds = (lots || []).map(lot => lot.id).filter(Boolean);
+    const { data, error } = await db.from('inventory_events_v2')
+      .select('*').in('lot_id', lotIds).order('created_at', { ascending: false }).limit(120);
+    if (error) {
+      if (!isMissingRelation(error)) throw error;
+    } else {
+      movements = data || [];
+    }
+  }
+
+  // v2 inventory_lots is already authoritative; it has no activation/config gate.
+  return { installed: true, enabled: true, config: null, lots: lots || [], movements };
 }
 
 function batchSummary(lots = []) {
@@ -130,9 +137,8 @@ function batchSummary(lots = []) {
 }
 
 async function findReconProduct(db) {
-  // Prefer the batch inventory configuration because it already points at the
-  // exact parent product and does not depend on optional catalogue columns.
-  // This also keeps Lot Inventory tied to the same product it is managing.
+  // Prefer an explicit product id when configured; otherwise resolve the stable
+  // Recon Water product directly from public.products.
   const configuredId = String(process.env.RECON_PRODUCT_ID || '').trim();
   if (configuredId) {
     const { data, error } = await db.from('products').select('*').eq('id', configuredId).maybeSingle();
@@ -140,37 +146,14 @@ async function findReconProduct(db) {
     if (data) return data;
   }
 
-  const { data: inventoryConfigs, error: configError } = await db
-    .from('recon_inventory_config')
-    .select('product_id')
-    .limit(10);
-  if (!configError && inventoryConfigs?.length) {
-    // A Recon Water deployment should normally have one configured product.
-    // Prefer an enabled row when multiple historical rows exist.
-    let productId = inventoryConfigs[0]?.product_id;
-    if (inventoryConfigs.length > 1) {
-      const { data: detailedConfigs } = await db
-        .from('recon_inventory_config')
-        .select('product_id,enabled,updated_at')
-        .order('enabled', { ascending: false })
-        .order('updated_at', { ascending: false })
-        .limit(1);
-      productId = detailedConfigs?.[0]?.product_id || productId;
-    }
-    if (productId) {
-      const { data, error } = await db.from('products').select('*').eq('id', productId).maybeSingle();
-      if (error) throw error;
-      if (data) return data;
-    }
-  } else if (configError && !isMissingRelation(configError)) {
-    throw configError;
-  }
-
-  // Schema-tolerant fallback for a fresh install before the batch config row is
-  // created. Read existing columns only; never require products.slug.
+  // The stable v2 schema identifies the Recon Water product directly from
+  // public.products. No secondary inventory configuration table is required.
   const { data: products, error } = await db.from('products').select('*').limit(500);
   if (error) throw error;
   const rows = (products || []).filter(row => row && row.id);
+  const bySku = rows.find(row => String(row.sku || '').trim().toUpperCase() === 'BW-30ML');
+  if (bySku) return bySku;
+
   const configuredSlug = String(process.env.RECON_PRODUCT_SLUG || '').trim().toLowerCase();
   const bySlug = configuredSlug
     ? rows.find(row => String(row.slug || '').trim().toLowerCase() === configuredSlug)
@@ -311,16 +294,14 @@ async function validatePromo(db, rawCode, subtotal) {
 
 async function eligiblePackageAvailability(db, variant) {
   const today = new Date().toISOString().slice(0, 10);
-  const tables = ['recon_inventory_lots', 'inventory_lots'];
-  let lots = null;
-  for (const table of tables) {
-    const { data, error } = await db.from(table)
-      .select('status,expiry_date,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved')
-      .eq('product_id', variant.product_id);
-    if (!error) { lots = data || []; break; }
-    if (!isMissingRelation(error)) throw error;
+  const { data, error } = await db.from('inventory_lots')
+    .select('status,expiry_date,loose_on_hand,loose_reserved,sealed_on_hand,sealed_reserved')
+    .eq('product_id', variant.product_id);
+  if (error) {
+    if (isMissingRelation(error)) return null;
+    throw error;
   }
-  if (!lots) return null;
+  const lots = data || [];
   const eligible = lots.filter(lot => lot.status === 'available' && lot.expiry_date && lot.expiry_date >= today);
   if (String(variant.stock_kind || variant.metadata?.stock_kind) === 'sealed') {
     return eligible.reduce((sum, lot) => sum + Math.max(0, Number(lot.sealed_on_hand || 0) - Number(lot.sealed_reserved || 0)), 0);
@@ -512,8 +493,8 @@ export async function handler(event) {
           packageAvailability: {},
           diagnostics: {
             ...database,
-            missing_relation: 'public.recon_inventory_config',
-            installer: 'supabase/012_batch_inventory_REPAIR_INSTALL.sql'
+            missing_relation: 'public.inventory_lots',
+            installer: 'supabase/003_packaging_and_lots.sql'
           }
         });
       }
@@ -542,7 +523,7 @@ export async function handler(event) {
     if (event.httpMethod === 'POST' && mode === 'inventory-receive') {
       const admin = await requireInventoryAdmin(event, db);
       const product = await findReconProduct(db);
-      const { data, error } = await db.rpc('recon_receive_inventory_lot', {
+      const { data, error } = await db.rpc('service_admin_receive_lot_v2', {
         p_product_id: product.id,
         p_lot_code: String(body.lot_code || ''),
         p_expiry: body.expiry_date || null,
@@ -558,7 +539,7 @@ export async function handler(event) {
 
     if (event.httpMethod === 'POST' && mode === 'inventory-update-lot') {
       const admin = await requireInventoryAdmin(event, db);
-      const { error } = await db.rpc('recon_update_inventory_lot', {
+      const { error } = await db.rpc('service_admin_update_lot_v2', {
         p_lot_id: String(body.lot_id || ''), p_lot_code: String(body.lot_code || ''), p_expiry: body.expiry_date || null,
         p_supplier: String(body.supplier_reference || ''), p_location: String(body.location || ''), p_status: String(body.status || ''), p_actor: admin.id,
       });
@@ -568,7 +549,7 @@ export async function handler(event) {
 
     if (event.httpMethod === 'POST' && mode === 'inventory-adjust-lot') {
       const admin = await requireInventoryAdmin(event, db);
-      const { error } = await db.rpc('recon_adjust_inventory_lot', {
+      const { error } = await db.rpc('service_admin_adjust_lot_v2', {
         p_lot_id: String(body.lot_id || ''), p_loose_delta: Number(body.loose_delta || 0), p_sealed_delta: Number(body.sealed_delta || 0),
         p_reason: String(body.reason || ''), p_actor: admin.id,
       });
@@ -578,17 +559,16 @@ export async function handler(event) {
 
     if (event.httpMethod === 'POST' && mode === 'inventory-open-case') {
       const admin = await requireInventoryAdmin(event, db);
-      const { error } = await db.rpc('recon_open_inventory_case', { p_lot_id: String(body.lot_id || ''), p_actor: admin.id });
+      const { error } = await db.rpc('service_admin_open_case_v2', { p_lot_id: String(body.lot_id || ''), p_actor: admin.id });
       if (error) throw error;
       return json(200, { ok: true });
     }
 
     if (event.httpMethod === 'POST' && mode === 'inventory-activate') {
-      const admin = await requireInventoryAdmin(event, db);
-      const product = await findReconProduct(db);
-      const { data, error } = await db.rpc('recon_activate_batch_inventory', { p_product_id: product.id, p_actor: admin.id });
-      if (error) throw error;
-      return json(200, { ok: true, inventory: data });
+      await requireInventoryAdmin(event, db);
+      // Compatibility endpoint retained for older admin bundles. The v2 ledger is
+      // authoritative as soon as inventory_lots exists, so no activation is needed.
+      return json(200, { ok: true, already_authoritative: true });
     }
 
     if (event.httpMethod === 'POST' && mode === 'promo-validate') {
