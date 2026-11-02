@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './home-page.css';
 import SiteHeader from './SiteHeader';
+import SupportWidget from './SupportWidget';
 
 function Icon({ name, size = 20 }) {
   const common = { width:size, height:size, viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:'1.8', strokeLinecap:'round', strokeLinejoin:'round', 'aria-hidden':'true' };
@@ -68,6 +69,7 @@ function HomePage() {
         </div>
       </section>
     </main>
+    <SupportWidget/>
   </div>;
 }
 

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './storefront-payments.css';
 import SiteHeader from './SiteHeader';
+import SupportWidget from './SupportWidget';
 import { CANADIAN_PROVINCES, formatCanadianPostal } from './canada';
 
 const PRODUCT_IMAGES = [
@@ -289,6 +290,7 @@ function Storefront() {
     </div>}
 
     <div className="mobile-atc"><div><small>{selectedPack.label}</small><b>${money(selectedPack.price)} CAD</b></div><button onClick={addToCart} disabled={!selectedInStock}>{selectedInStock?'Add to cart':'Unavailable'}</button></div>
+    <SupportWidget/>
   </div>;
 }
 

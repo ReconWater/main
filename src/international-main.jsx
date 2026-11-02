@@ -4,6 +4,7 @@ import './styles.css';
 import './international-page.css';
 import './international-payments.css';
 import SiteHeader from './SiteHeader';
+import SupportWidget from './SupportWidget';
 
 const API = '/.netlify/functions/recon-api';
 const money = value => Number(value || 0).toFixed(2);
@@ -136,6 +137,7 @@ function InternationalOrders() {
         </form>
       </div></section>
     </main>
+  <SupportWidget/>
   </div>;
 }
 
