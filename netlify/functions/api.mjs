@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import {packageAvailability} from '../../src/availability.js';
-import {chitChatsConfigured,chitChatsEnvironment} from './_chitchats.mjs';
 
 const reply = (body,status=200) => new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 
@@ -242,20 +241,18 @@ export default async request => {
         }
       };
 
-      const [promos,paymentSettings,shippingProfiles]=await Promise.all([
+      const [promos,paymentSettings]=await Promise.all([
         optionalModule('promos','Promo codes','supabase/006_promo_codes.sql',
           db.from('promo_codes').select('id,code,discount_type,discount_value,min_subtotal_cents,max_uses,uses_count,starts_on,ends_on,active,internal_note,created_at,updated_at').order('created_at',{ascending:false}),[]),
         optionalModule('payments','Payment methods','supabase/008_manual_payments.sql',
-          db.from('payment_settings').select('id,etransfer_enabled,etransfer_email,etransfer_recipient_name,etransfer_note,usdc_eth_enabled,usdc_eth_address,usdc_note,updated_at').eq('id',1).maybeSingle(),null),
-        optionalModule('shipping','Chit Chats shipping','supabase/010_chitchats_shipping.sql',
-          db.from('shipping_profiles').select('*').order('market').order('vial_quantity',{ascending:true,nullsFirst:false}),[])
+          db.from('payment_settings').select('id,etransfer_enabled,etransfer_email,etransfer_recipient_name,etransfer_note,usdc_eth_enabled,usdc_eth_address,usdc_note,updated_at').eq('id',1).maybeSingle(),null)
       ]);
       // One concise warning per module.
       const warnings=[...new Map(moduleWarnings.map(w=>[w.id,w])).values()];
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,archivedOrders:arch.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
-        referrals:[],referralRewards:[],shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},
+        referrals:[],referralRewards:[],
         emailDelivery:{provider:'resend',configured:resendConfig().configured},moduleWarnings:warnings});
     }
     if(action==='orders-page') {
@@ -334,26 +331,6 @@ export default async request => {
       return reply({promo:result.data});
     }
     if(action==='save-referral') return reply({error:'The referral program is temporarily disabled while it is being upgraded.'},410);
-
-    if(action==='save-shipping-profile'){
-      const id=body.id?String(body.id):null;
-      const packageId=String(body.package_id||'');
-      const active=!!body.active;
-      const weight=body.weight_g===''||body.weight_g==null?null:Number(body.weight_g);
-      const length=body.length_cm===''||body.length_cm==null?null:Number(body.length_cm);
-      const width=body.width_cm===''||body.width_cm==null?null:Number(body.width_cm);
-      const height=body.height_cm===''||body.height_cm==null?null:Number(body.height_cm);
-      const dims=[weight,length,width,height];
-      if(!packageId) return reply({error:'Select a Canadian package'},400);
-      if(dims.some(v=>v!=null&&(!(v>0)||v>100000))) return reply({error:'Packed weight and dimensions must be positive numbers'},400);
-      if(active&&dims.some(v=>!(v>0))) return reply({error:'Enter packed weight and all dimensions before enabling live rates'},400);
-      const payload={package_id:packageId,label:String(body.label||'').trim().slice(0,120),package_type:'parcel',weight_g:weight,length_cm:length,width_cm:width,height_cm:height,active,updated_at:new Date().toISOString()};
-      let result;
-      if(id) result=await db.from('shipping_profiles').update(payload).eq('id',id).select('*').single();
-      else result=await db.from('shipping_profiles').insert(payload).select('*').single();
-      if(result.error) throw result.error;
-      return reply({profile:result.data});
-    }
 
     if(action==='save-payment-settings'){
       const etransferEnabled=!!body.etransfer_enabled;

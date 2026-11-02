@@ -19,6 +19,7 @@ const FALLBACK_PACKS = [
 ];
 
 const API = '/.netlify/functions/recon-api';
+const FLAT_SHIPPING_CENTS = 2500;
 const money = value => Number(value || 0).toFixed(2);
 
 async function apiRequest(mode, options = {}) {
@@ -57,11 +58,6 @@ function Storefront() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [checkoutForm, setCheckoutForm] = useState({ name: '', email: '', address: '', city: '', region: 'ON', postal: '', notes: '' });
   const [checkoutState, setCheckoutState] = useState({ busy: false, ok: false, message: '', orderNumber: '' });
-  const [shippingQuote, setShippingQuote] = useState(null);
-  const [shippingRefreshKey, setShippingRefreshKey] = useState(0);
-  const [shippingRates, setShippingRates] = useState([]);
-  const [selectedShipping, setSelectedShipping] = useState(null);
-  const [shippingState, setShippingState] = useState({ busy: false, message: '' });
 
   useEffect(() => {
     let alive = true;
@@ -113,36 +109,14 @@ function Storefront() {
     setPromo(null);
     setPromoInput('');
     setPromoState({ busy: false, message: '', error: false });
-    setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:''});
     setCartOpen(true);
   };
   const cartSubtotalCents = cart ? Math.round(Number(cart.price) * 100) : 0;
   const cartDiscountCents = promo ? Number(promo.discount_cents || 0) : 0;
   const cartTotalCents = Math.max(0, cartSubtotalCents - cartDiscountCents);
-  const shippingChargeCents = selectedShipping ? Number(selectedShipping.amount_cents || 0) : 0;
+  const shippingChargeCents = cart ? FLAT_SHIPPING_CENTS : 0;
   const checkoutGrandTotalCents = cartTotalCents + shippingChargeCents;
   const formattedPostal = formatCanadianPostal(checkoutForm.postal);
-  const shippingAddressReady = !!(checkoutOpen && cart && checkoutForm.name.trim().length >= 2 && checkoutForm.address.trim().length >= 5 && checkoutForm.city.trim().length >= 2 && /^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z] \d[A-CEGHJ-NPRSTV-Z]\d$/.test(formattedPostal));
-
-  useEffect(() => {
-    if (!shippingAddressReady || !cart) { setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:''});return; }
-    let alive = true;
-    const timer = setTimeout(async () => {
-      setShippingState({busy:true,message:'Calculating shipping rates…'});
-      try {
-        const result = await apiRequest('shipping-quote', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ market:'domestic', name:checkoutForm.name, email:checkoutForm.email, package_id:cart.id, shipping:{ address:checkoutForm.address, city:checkoutForm.city, region:checkoutForm.region, postal:formattedPostal, country:'Canada' } }) });
-        if (!alive) return;
-        const rates = Array.isArray(result.rates) ? result.rates : [];
-        setShippingQuote(result);setShippingRates(rates);
-        setSelectedShipping(current => rates.find(rate => rate.quote_id === current?.quote_id) || rates[0] || null);
-        setShippingState({busy:false,message:rates.length?'Delivery rates loaded.':'No shipping service is currently available for this address.'});
-      } catch (error) {
-        if (!alive) return;
-        setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingState({busy:false,message:error.message || 'Shipping rates are temporarily unavailable.'});
-      }
-    }, 700);
-    return () => { alive = false;clearTimeout(timer); };
-  }, [shippingAddressReady, cart?.id, checkoutForm.name, checkoutForm.email, checkoutForm.address, checkoutForm.city, checkoutForm.region, formattedPostal, shippingRefreshKey]);
   async function applyPromo(event) {
     event.preventDefault();
     if (!cart || !promoInput.trim()) return;
@@ -168,7 +142,6 @@ function Storefront() {
   }
   const patchCheckout = (key, value) => {
     setCheckoutForm(current => ({ ...current, [key]: value }));
-    if (['name','email','address','city','region','postal'].includes(key)) { setShippingRates([]);setSelectedShipping(null);setShippingQuote(null); }
   };
   async function submitDomestic(event) {
     event.preventDefault();
@@ -190,9 +163,6 @@ function Storefront() {
             postal: formatCanadianPostal(checkoutForm.postal),
             country: 'Canada',
           },
-          shipping_service_code: selectedShipping?.service_code || null,
-          shipping_quote_id: selectedShipping?.quote_id || null,
-          expected_shipping_cents: selectedShipping?.amount_cents ?? null,
           notes: checkoutForm.notes,
         }),
       });
@@ -202,9 +172,6 @@ function Storefront() {
       setCartOpen(false);
     } catch (error) {
       const message = error.message || 'Could not submit request.';
-      if (/shipping quote|shipping service|shipping rate/i.test(message)) {
-        setShippingQuote(null);setShippingRates([]);setSelectedShipping(null);setShippingRefreshKey(key=>key+1);
-      }
       setCheckoutState({ busy: false, ok: false, message, orderNumber: '' });
     }
   }
@@ -276,15 +243,15 @@ function Storefront() {
               <div><span>Product subtotal</span><strong>${money(cartSubtotalCents/100)} CAD</strong></div>
               {promo&&<div className="checkout-discount-line"><span>Promo · {promo.code}</span><strong>−${money(cartDiscountCents/100)} CAD</strong></div>}
               <div><span>Product total</span><strong>${money(cartTotalCents/100)} CAD</strong></div>
-              <div className="checkout-shipping-line"><span>{selectedShipping?.service_name || 'Delivery'}</span><strong>{shippingState.busy?'Calculating…':selectedShipping?`$${money(shippingChargeCents/100)} CAD`:'Select a shipping rate'}</strong></div>
-              <div className="checkout-final-line"><span>Order total</span><strong>{selectedShipping?`$${money(checkoutGrandTotalCents/100)} CAD`:'—'}</strong></div>
+              <div className="checkout-shipping-line"><span>Canada flat-rate delivery</span><strong>${money(shippingChargeCents/100)} CAD</strong></div>
+              <div className="checkout-final-line"><span>Order total</span><strong>${money(checkoutGrandTotalCents/100)} CAD</strong></div>
             </div>
             <div className="checkout-code-grid">
               <form className="checkout-promo-form" onSubmit={applyPromo}><label htmlFor="checkout-promo-code">Promo code</label><div><input id="checkout-promo-code" value={promoInput} onChange={e=>setPromoInput(e.target.value.toUpperCase())} placeholder="Enter promo code" maxLength="32" disabled={promoState.busy}/>{promo?<button type="button" className="promo-remove" onClick={removePromo}>Remove</button>:<button type="submit" disabled={promoState.busy||!promoInput.trim()}>{promoState.busy?'Checking…':'Apply'}</button>}</div>{promoState.message&&<p className={`promo-message ${promoState.error?'is-error':'is-valid'}`} role="status">{promoState.message}</p>}</form>
             </div>
-            <p className="checkout-price-note">The referral program is temporarily unavailable while it is being upgraded. Existing referral records are preserved. A current shipping rate is required before a Canadian order can be submitted.</p>
+            <p className="checkout-price-note">The referral program is temporarily unavailable while it is being upgraded. Existing referral records are preserved. Canadian delivery is a fixed $25 CAD per order.</p>
           </div>
-          <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="checkout-shipping-picker full"><div className="checkout-shipping-head"><div><span>DELIVERY</span><strong>{shippingRates.length?'Choose a delivery service':'Shipping rates'}</strong></div><Icon name="truck" size={20}/></div>{!shippingAddressReady?<p>Complete your delivery address to calculate shipping.</p>:shippingState.busy?<p>Calculating available shipping services…</p>:shippingRates.length?<div className="checkout-shipping-options">{shippingRates.map(rate=><label key={rate.quote_id||rate.service_code} className={selectedShipping?.quote_id===rate.quote_id?'selected':''}><input type="radio" name="shipping-service" checked={selectedShipping?.quote_id===rate.quote_id} onChange={()=>setSelectedShipping(rate)}/><span><b>{rate.service_name}</b><small>{[rate.estimate,rate.tracking].filter(Boolean).join(' · ')}</small></span><strong>${money(rate.amount_cents/100)} CAD</strong></label>)}</div>:<p>{shippingState.message||'Shipping rates are unavailable for this address.'}</p>}</div><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy||!selectedShipping}>{checkoutState.busy?'Submitting…':selectedShipping?<>Submit request · ${money(checkoutGrandTotalCents/100)} CAD <Icon name="chevron" size={17}/></>:'Select shipping to continue'}</button></form>
+          <form className="store-checkout-form" onSubmit={submitDomestic}><label><span>Full name</span><input required minLength="2" maxLength="100" autoComplete="name" value={checkoutForm.name} onChange={e=>patchCheckout('name',e.target.value)}/></label><label><span>Email</span><input required type="email" autoComplete="email" value={checkoutForm.email} onChange={e=>patchCheckout('email',e.target.value)}/></label><label className="full"><span>Street address</span><input required minLength="5" autoComplete="street-address" value={checkoutForm.address} onChange={e=>patchCheckout('address',e.target.value)}/></label><label><span>City</span><input required minLength="2" autoComplete="address-level2" value={checkoutForm.city} onChange={e=>patchCheckout('city',e.target.value)}/></label><label><span>Province / territory</span><select value={checkoutForm.region} onChange={e=>patchCheckout('region',e.target.value)}>{CANADIAN_PROVINCES.map(p=><option key={p.code} value={p.code}>{p.name}</option>)}</select></label><label><span>Postal code</span><input required maxLength="7" placeholder="K1A 0B1" autoComplete="postal-code" value={checkoutForm.postal} onChange={e=>patchCheckout('postal',e.target.value.toUpperCase())}/></label><label className="full"><span>Order note (optional)</span><textarea maxLength="1000" rows="2" value={checkoutForm.notes} onChange={e=>patchCheckout('notes',e.target.value)}/></label><div className="checkout-shipping-picker full"><div className="checkout-shipping-head"><div><span>DELIVERY</span><strong>Canada flat-rate delivery</strong></div><Icon name="truck" size={20}/></div><div className="checkout-fixed-shipping"><span>One fixed delivery charge per Canadian order.</span><strong>${money(FLAT_SHIPPING_CENTS/100)} CAD</strong></div></div><div className="store-payment-method full"><div><span>PAYMENT METHOD</span><strong>Interac e-Transfer</strong></div><p>Payment is requested after approval. Do not transfer funds at this stage.</p></div>{checkoutState.message&&<div className="store-checkout-error full" role="alert">{checkoutState.message}</div>}<button className="store-submit full" disabled={checkoutState.busy}>{checkoutState.busy?'Submitting…':<>Submit request · ${money(checkoutGrandTotalCents/100)} CAD <Icon name="chevron" size={17}/></>}</button></form>
         </>}
       </section>
     </div>}
