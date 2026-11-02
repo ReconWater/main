@@ -218,16 +218,17 @@ export default async request => {
       // Core operations must stay available even if a newer optional module has not
       // been migrated yet. Promo/payment/referral features are loaded independently
       // and report their own migration warning instead of taking down /admin.
-      const [pr,pk,lo,ord,ev,alloc,prices]=await Promise.all([
+      const [pr,pk,lo,ord,arch,ev,alloc,prices]=await Promise.all([
         db.from('products').select('*').eq('sku','BW-30ML'),
         db.from('product_packages').select('*').order('vials_per_pack'),
         db.from('inventory_lots').select('*').order('expiry_date'),
-        db.from('orders').select('*,order_items(*)').order('created_at',{ascending:false}).limit(150),
+        db.from('orders').select('*,order_items(*)').is('archived_at',null).order('created_at',{ascending:false}).limit(150),
+        db.from('orders').select('*,order_items(*)').not('archived_at','is',null).order('archived_at',{ascending:false}).limit(150),
         db.from('inventory_events_v2').select('*').order('created_at',{ascending:false}).limit(150),
         db.from('order_allocations_v2').select('*').order('created_at',{ascending:false}).limit(250),
         db.from('package_price_events_v2').select('*').order('created_at',{ascending:false}).limit(50)
       ]);
-      for(const r of [pr,pk,lo,ord,ev,alloc,prices]) if(r.error) throw r.error;
+      for(const r of [pr,pk,lo,ord,arch,ev,alloc,prices]) if(r.error) throw r.error;
 
       const moduleWarnings=[];
       const optionalModule=async(id,label,migration,promise,fallback)=>{
@@ -252,7 +253,7 @@ export default async request => {
       // One concise warning per module.
       const warnings=[...new Map(moduleWarnings.map(w=>[w.id,w])).values()];
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
-      return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
+      return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,archivedOrders:arch.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
         referrals:[],referralRewards:[],shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},
         emailDelivery:{provider:'resend',configured:resendConfig().configured},moduleWarnings:warnings});
@@ -261,7 +262,7 @@ export default async request => {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
       const pageSize=100;
       const {data,error}=await db.from('orders').select('*,order_items(*)')
-        .order('created_at',{ascending:false}).range(offset,offset+pageSize-1);
+        .is('archived_at',null).order('created_at',{ascending:false}).range(offset,offset+pageSize-1);
       if(error) throw error;
       return reply({orders:data||[],next_offset:offset+(data?.length||0),has_more:(data||[]).length===pageSize});
     }
@@ -287,6 +288,27 @@ export default async request => {
       }
       await rpc('service_admin_order_transition_v2',{p_order_id:body.order_id,p_status:body.status,p_actor:user.id});
       if(body.status==='cancelled') await db.from('orders').update({payment_status:'cancelled'}).eq('id',body.order_id).neq('payment_status','paid');
+      return reply({ok:true});
+    }
+    if(action==='archive-order') {
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('id,status,archived_at').eq('id',orderId).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(order.archived_at) return reply({ok:true});
+      if(!['fulfilled','cancelled'].includes(order.status)) return reply({error:'Only fulfilled or cancelled orders can be archived'},409);
+      const {error:updateError}=await db.from('orders').update({archived_at:new Date().toISOString(),archived_by:user.id}).eq('id',orderId);
+      if(updateError) throw updateError;
+      return reply({ok:true});
+    }
+    if(action==='restore-order') {
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('id,archived_at').eq('id',orderId).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(!order.archived_at) return reply({ok:true});
+      const {error:updateError}=await db.from('orders').update({archived_at:null,archived_by:null}).eq('id',orderId);
+      if(updateError) throw updateError;
       return reply({ok:true});
     }
     if(action==='manual-order') {const id=await rpc('service_admin_manual_order_v2',{
