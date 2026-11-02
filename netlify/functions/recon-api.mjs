@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { chitChatsConfigured, chitChatsEnvironment, getChitChatsRates } from './_chitchats.mjs';
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -29,13 +28,6 @@ function supabaseProjectIdentity() {
   } catch {
     return { project_ref: null, host: null };
   }
-}
-
-async function getReconShippingMode(db) {
-  const { data, error } = await db.from('app_settings').select('value').eq('key', 'recon_shipping_mode').maybeSingle();
-  if (error) throw error;
-  const mode = String(data?.value?.mode || 'chitchats').trim().toLowerCase();
-  return { mode: mode === 'flat_25' ? 'flat_25' : 'chitchats', flat_rate_cad: FLAT_CANADA_RATE_CAD };
 }
 
 function isMissingRelation(error) {
@@ -83,10 +75,6 @@ async function requireReconAdmin(event, db, allowedProfileRoles = null) {
     throw Object.assign(new Error('Administrator permission required.'), { statusCode: 403 });
   }
   return user;
-}
-
-async function requireShippingAdmin(event, db) {
-  return requireReconAdmin(event, db, ['owner','admin']);
 }
 
 async function requireInventoryAdmin(event, db) {
@@ -347,10 +335,9 @@ async function submitFlatDomesticOrder(db, body, variant, shipping) {
 
     const shippingRecord = {
       ...shipping,
-      shipping_service_code: 'flat-25-cad',
-      shipping_service_name: 'Flat rate shipping',
-      shipping_provider: 'flat_rate',
-      shipping_rate_cents: FLAT_CANADA_RATE_CAD * 100,
+      delivery_method: 'flat-rate',
+      delivery_name: 'Canada flat-rate delivery',
+      delivery_rate_cents: FLAT_CANADA_RATE_CAD * 100,
     };
     const orderPayload = {
       customer_name: name,
@@ -394,7 +381,7 @@ async function submitFlatDomesticOrder(db, body, variant, shipping) {
       promo_discount_cents: promo?.discount_cents || 0,
       shipping_cents: FLAT_CANADA_RATE_CAD * 100,
       total_cents: Math.max(0, subtotalCents - (promo?.discount_cents || 0)) + FLAT_CANADA_RATE_CAD * 100,
-      shipping_mode: 'flat_25',
+      delivery_method: 'flat-rate',
     };
   } catch (error) {
     if (orderId) {
@@ -447,15 +434,6 @@ function validCanadianAddress(shipping) {
   return String(shipping.address || '').trim().length >= 5 && String(shipping.city || '').trim().length >= 2 && regions.has(region) && /^[A-CEGHJ-NPRSTVXY]\d[A-CEGHJ-NPRSTV-Z][ ]?\d[A-CEGHJ-NPRSTV-Z]\d$/.test(postal) && String(shipping.country || '').trim().toLowerCase() === 'canada';
 }
 
-async function getProfile(db, packageId) {
-  let result = await db.from('shipping_profiles').select('*').eq('package_id', packageId).maybeSingle();
-  if (!result.error) return result.data || null;
-  if (!/column .*package_id|schema cache/i.test(String(result.error?.message || ''))) throw result.error;
-  result = await db.from('shipping_profiles').select('*').eq('variant_id', packageId).maybeSingle();
-  if (result.error) throw result.error;
-  return result.data || null;
-}
-
 export async function handler(event) {
   if (event.httpMethod === 'OPTIONS') return json(204, {});
   let db;
@@ -465,15 +443,11 @@ export async function handler(event) {
   try {
     if (event.httpMethod === 'GET' && mode === 'health') {
       const { error } = await db.from('products').select('id').limit(1);
-      return error ? json(503, { connected: false, error: error.message }) : json(200, { connected: true, chitchats: chitChatsConfigured() });
+      return error ? json(503, { connected: false, error: error.message }) : json(200, { connected: true });
     }
 
     if (event.httpMethod === 'GET' && mode === 'catalogue') return json(200, await loadCatalogue(db, false));
 
-    if (event.httpMethod === 'GET' && mode === 'shipping-settings') {
-      await requireShippingAdmin(event, db);
-      return json(200, await getReconShippingMode(db));
-    }
 
     if (event.httpMethod === 'GET' && mode === 'inventory-admin') {
       await requireInventoryAdmin(event, db);
@@ -510,15 +484,6 @@ export async function handler(event) {
     }
 
 
-    if (event.httpMethod === 'POST' && mode === 'shipping-settings-save') {
-      const admin = await requireShippingAdmin(event, db);
-      const requestedMode = String(body.mode || '').trim().toLowerCase();
-      if (!['chitchats','flat_25'].includes(requestedMode)) return json(400, { error: 'Invalid shipping mode.' });
-      const value = { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD, updated_by: admin.id, updated_at: new Date().toISOString() };
-      const { error } = await db.from('app_settings').upsert({ key: 'recon_shipping_mode', value, public_read: false, updated_by: admin.id, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-      if (error) throw error;
-      return json(200, { mode: requestedMode, flat_rate_cad: FLAT_CANADA_RATE_CAD });
-    }
 
     if (event.httpMethod === 'POST' && mode === 'inventory-receive') {
       const admin = await requireInventoryAdmin(event, db);
@@ -599,51 +564,6 @@ export async function handler(event) {
       return json(200, { code: normalizeCode(body.code), discount_cents: cents(reward.discount), final_subtotal_cents: cents(Math.max(0, eligible - reward.discount)) });
     }
 
-    if (event.httpMethod === 'POST' && mode === 'shipping-quote') {
-      if (String(body.market || 'domestic') !== 'domestic') return json(400, { error: 'Automated shipping is available only for Canadian Recon Water orders.' });
-      const variant = await loadVariant(db, String(body.package_id || ''));
-      if (!variant || String(variant.currency || '').trim().toUpperCase() !== 'CAD') return json(400, { error: 'Selected package is unavailable.' });
-      const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
-      if (!validCanadianAddress(shipping)) return json(400, { error: 'Complete a valid Canadian delivery address to calculate shipping.' });
-      const shippingMode = await getReconShippingMode(db);
-      if (shippingMode.mode === 'flat_25') {
-        const flatRate = {
-          service_code: 'flat-25-cad',
-          service_name: 'Flat rate shipping',
-          amount_cents: FLAT_CANADA_RATE_CAD * 100,
-          estimate: null,
-          tracking: null,
-          provider: 'flat_rate',
-          quote_id: `flat-25-cad:${variant.id}`,
-        };
-        return json(200, { configured: true, mode: 'flat_25', environment: 'flat-rate', rates: [flatRate] });
-      }
-
-      const items = [{ variant_id: variant.id, quantity: 1 }];
-      if (!chitChatsConfigured()) return json(503, { error: 'Chit Chats is not configured in Netlify yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
-      const profile = await getProfile(db, variant.id);
-      if (!profile?.active) return json(409, { error: 'Live shipping is not configured for this package yet. An administrator can enable the $25 CAD emergency flat rate from Admin → Shipping.' });
-      const recipient = { ...shipping, name: String(body.name || '').trim(), email: String(body.email || '').trim() };
-      const rawRates = await getChitChatsRates({ profile, recipient, valueCents: cents(variant.price), sku: variant.sku });
-      const rates = [];
-      for (const rate of rawRates) {
-        const { data: quoteId, error } = await db.rpc('recon_store_shipping_quote', {
-          p_shipping_address: shipping,
-          p_market: 'domestic',
-          p_items: items,
-          p_service_code: rate.service_code,
-          p_service_name: rate.service_name,
-          p_amount: Number(rate.amount_cents) / 100,
-          p_currency: 'CAD',
-          p_estimate: rate.estimate || null,
-          p_provider_payload: rate,
-          p_ttl_minutes: 15,
-        });
-        if (error) throw error;
-        rates.push({ ...rate, provider: 'chitchats', quote_id: quoteId });
-      }
-      return json(200, { configured: true, mode: 'chitchats', environment: chitChatsEnvironment(), rates });
-    }
 
     if (event.httpMethod === 'POST' && mode === 'submit-domestic') {
       const name = String(body.name || '').trim();
@@ -654,38 +574,8 @@ export async function handler(event) {
       const shipping = body.shipping && typeof body.shipping === 'object' ? { ...body.shipping, country: 'Canada' } : null;
       if (!validCanadianAddress(shipping)) return json(400, { error: 'A complete Canadian delivery address is required.' });
 
-      const shippingMode = await getReconShippingMode(db);
-      if (shippingMode.mode === 'flat_25') {
-        const result = await submitFlatDomesticOrder(db, body, variant, shipping);
-        return json(200, result);
-      }
-
-      const quoteId = String(body.shipping_quote_id || '').trim();
-      const expectedShippingCents = Number(body.expected_shipping_cents);
-      if (!quoteId || !Number.isInteger(expectedShippingCents) || expectedShippingCents <= 0) return json(409, { error: 'Choose a current shipping service before submitting.' });
-      const idempotency = body.idempotency_key || crypto.randomUUID();
-      const address = { ...shipping, shipping_quote_id: quoteId };
-      const items = [{ variant_id: variant.id, quantity: 1 }];
-      const { data, error } = await db.rpc('recon_create_order_v1', {
-        p_idempotency_key: idempotency,
-        p_customer_name: name,
-        p_customer_email: email,
-        p_shipping_address: address,
-        p_market: 'domestic',
-        p_currency: 'CAD',
-        p_shipping_total: expectedShippingCents / 100,
-        p_items: items,
-        p_payment_method: 'etransfer',
-        p_promo_code: body.promo_code || null,
-        p_referral_code: null,
-        p_referral_reward_code: null,
-      });
-      if (error) {
-        const code = String(error.message || '');
-        if (/SHIPPING_QUOTE_REQUIRED|SHIPPING_QUOTE_EXPIRED|SHIPPING_CHANGED/.test(code)) return json(409, { error: 'The shipping quote changed or expired. Recalculate shipping and review the total.' });
-        throw error;
-      }
-      return json(200, data || {});
+      const result = await submitFlatDomesticOrder(db, body, variant, shipping);
+      return json(200, result);
     }
 
     if (event.httpMethod === 'POST' && mode === 'submit-international') {

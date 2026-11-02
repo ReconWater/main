@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles.css';
 import './products-page.css';
 import SiteHeader from './SiteHeader';
+import SupportWidget from './SupportWidget';
 
 const PRODUCTS = [
   {
@@ -49,6 +50,7 @@ function ProductsPage() {
         </div>
       </div></section>
     </main>
+    <SupportWidget/>
   </div>;
 }
 

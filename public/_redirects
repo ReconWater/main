@@ -1,5 +1,6 @@
 # Backend API must resolve before any page fallback.
 /api/recon /.netlify/functions/api 200
+/api/support /.netlify/functions/support-api 200
 
 # Admin entry must resolve before storefront routes.
 /admin /admin.html 200
