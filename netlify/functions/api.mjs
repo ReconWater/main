@@ -69,9 +69,60 @@ function paymentInstructions(order,settings){
   throw new Error('Payment method is not configured');
 }
 
+const escapeHtml = value => String(value ?? '')
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+const moneyText = (cents,currency='CAD') => new Intl.NumberFormat('en-CA',{style:'currency',currency}).format(Number(cents||0)/100);
+const resendConfig = () => {
+  const apiKey=String(process.env.RESEND_API_KEY||'').trim();
+  const fromEmail=String(process.env.RESEND_FROM_EMAIL||'').trim();
+  const fromName=String(process.env.RESEND_FROM_NAME||'Recon Water').trim()||'Recon Water';
+  return {apiKey,fromEmail,fromName,configured:Boolean(apiKey&&fromEmail)};
+};
+async function sendResendEmail({to,subject,html,text,idempotencyKey}){
+  const cfg=resendConfig();
+  if(!cfg.configured) throw new Error('Transactional email is not configured in Netlify');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to||'').trim())) throw new Error('Customer email address is invalid');
+  const from=cfg.fromEmail.includes('<')?cfg.fromEmail:`${cfg.fromName} <${cfg.fromEmail}>`;
+  const headers={'Authorization':`Bearer ${cfg.apiKey}`,'Content-Type':'application/json'};
+  if(idempotencyKey) headers['Idempotency-Key']=String(idempotencyKey).slice(0,256);
+  const response=await fetch('https://api.resend.com/emails',{
+    method:'POST',headers,
+    body:JSON.stringify({from,to:[String(to).trim()],subject,html,text})
+  });
+  let payload={};
+  try{payload=await response.json()}catch{}
+  if(!response.ok) {
+    console.error('Resend email failed',response.status,payload?.name||'',payload?.message||'');
+    throw new Error('Transactional email could not be sent');
+  }
+  return payload;
+}
+function paymentRequestEmail(order,instructions){
+  const amount=moneyText(instructions.amount_cents,instructions.currency);
+  const orderNumber=escapeHtml(order.order_number||'');
+  const customer=escapeHtml(order.customer_name||'');
+  const destination=escapeHtml(instructions.destination||'');
+  const recipient=escapeHtml(instructions.recipient_name||'Recon Water');
+  const reference=escapeHtml(instructions.reference||order.order_number||'');
+  const note=escapeHtml(instructions.note||'Use the order reference in the transfer message.');
+  const subject=`Payment requested · ${order.order_number} · Recon Water`;
+  const text=`Recon Water\n\nYour order ${order.order_number} has been approved and reserved.\n\nAmount due: ${amount}\nSend Interac e-Transfer to: ${instructions.destination}\nRecipient: ${instructions.recipient_name||'Recon Water'}\nReference: ${instructions.reference||order.order_number}\n\n${instructions.note||'Use the order reference in the transfer message.'}\n\nDo not send a different amount. Your order will move to fulfillment after the transfer is verified.`;
+  const html=`<!doctype html><html><body style="margin:0;background:#f3f7f8;font-family:Arial,sans-serif;color:#123746"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f7f8;padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #d7e3e7;border-radius:16px;overflow:hidden"><tr><td style="padding:28px 32px 18px"><div style="font-size:12px;letter-spacing:2px;font-weight:700;color:#5e8492">RECON WATER</div><h1 style="margin:8px 0 10px;font-size:26px;line-height:1.2;color:#0d3444">Payment requested.</h1><p style="margin:0;color:#55717c;line-height:1.6">${customer?`${customer}, your`: 'Your'} order <strong>${orderNumber}</strong> has been approved and reserved.</p></td></tr><tr><td style="padding:0 32px 24px"><div style="background:#eef5f6;border-radius:12px;padding:20px"><div style="font-size:12px;letter-spacing:1.4px;color:#6b8791;font-weight:700">AMOUNT DUE</div><div style="font-size:34px;font-weight:800;margin-top:5px;color:#0d3444">${escapeHtml(amount)}</div></div></td></tr><tr><td style="padding:0 32px 30px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:15px"><tr><td style="padding:10px 0;color:#6b8791">Interac e-Transfer</td><td style="padding:10px 0;text-align:right;font-weight:700">${destination}</td></tr><tr><td style="padding:10px 0;color:#6b8791">Recipient</td><td style="padding:10px 0;text-align:right;font-weight:700">${recipient}</td></tr><tr><td style="padding:10px 0;color:#6b8791">Reference</td><td style="padding:10px 0;text-align:right;font-weight:700">${reference}</td></tr></table><div style="margin-top:18px;padding:15px 16px;border-left:3px solid #7ba1ae;background:#f7fafb;color:#4d6974;line-height:1.55">${note}</div><p style="margin:20px 0 0;color:#55717c;line-height:1.6">Please send the exact amount shown above. We will move the order to fulfillment after the transfer is independently verified.</p></td></tr></table></td></tr></table></body></html>`;
+  return {subject,text,html};
+}
+function paymentReceivedEmail(order){
+  const amount=moneyText(order.payment_amount_cents,order.payment_currency||'CAD');
+  const orderNumber=escapeHtml(order.order_number||'');
+  const customer=escapeHtml(order.customer_name||'');
+  const subject=`Payment received · ${order.order_number} · Recon Water`;
+  const text=`Recon Water\n\nPayment received for order ${order.order_number}.\nAmount confirmed: ${amount}\n\nYour payment has been verified and the order is ready to proceed to fulfillment.`;
+  const html=`<!doctype html><html><body style="margin:0;background:#f3f7f8;font-family:Arial,sans-serif;color:#123746"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f7f8;padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #d7e3e7;border-radius:16px"><tr><td style="padding:30px 32px"><div style="font-size:12px;letter-spacing:2px;font-weight:700;color:#5e8492">RECON WATER</div><h1 style="margin:8px 0 10px;font-size:26px;color:#0d3444">Payment received.</h1><p style="margin:0;color:#55717c;line-height:1.6">${customer?`${customer}, we have`: 'We have'} verified payment for order <strong>${orderNumber}</strong>.</p><div style="margin:24px 0;background:#eef5f6;border-radius:12px;padding:20px"><div style="font-size:12px;letter-spacing:1.4px;color:#6b8791;font-weight:700">PAYMENT CONFIRMED</div><div style="font-size:32px;font-weight:800;margin-top:5px;color:#0d3444">${escapeHtml(amount)}</div></div><p style="margin:0;color:#55717c;line-height:1.6">The order can now proceed to fulfillment. No further payment action is required.</p></td></tr></table></td></tr></table></body></html>`;
+  return {subject,text,html};
+}
+
 const safeError = e => {
   const m=String(e?.message||'Request failed');
-  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|Payment|Interac|USDC|International|Referral)/i.test(m)) return m;
+  if (/^(Invalid|Insufficient|Too many|Package|Product|Promo|Order not|Legacy|No eligible|Cannot adjust|Expired|Allocated lot|Duplicate|Request exceeds|Select up|Request total|Payment|Interac|USDC|International|Referral|Transactional|Customer email)/i.test(m)) return m;
   return 'Request could not be completed. Check your details and try again.';
 };
 
@@ -203,7 +254,8 @@ export default async request => {
       const inventoryCounts=packageAvailability(pk.data||[],lo.data||[]);
       return reply({products:pr.data,packages:pk.data,lots:lo.data,packageAvailability:inventoryCounts.byId,orders:ord.data,
         movements:ev.data,allocations:alloc.data,priceEvents:prices.data,promos,paymentSettings,
-        referrals:[],referralRewards:[],shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},moduleWarnings:warnings});
+        referrals:[],referralRewards:[],shippingProfiles,chitchats:{configured:chitChatsConfigured(),environment:chitChatsEnvironment()},
+        emailDelivery:{provider:'resend',configured:resendConfig().configured},moduleWarnings:warnings});
     }
     if(action==='orders-page') {
       const offset=Math.max(0,Math.min(100000,Number.isInteger(body.offset)?body.offset:0));
@@ -302,24 +354,52 @@ export default async request => {
       if(error) throw error;
       if(!order) return reply({error:'Order not found'},404);
       if(order.status!=='approved') return reply({error:'Payment can only be requested after approval'},409);
+      if(order.payment_status==='awaiting_payment') return reply({error:'Payment has already been requested. Use Resend payment email instead.'},409);
+      if(order.payment_status==='paid') return reply({error:'Payment has already been confirmed for this order'},409);
       const method=order.market==='international'?'usdc_eth':'etransfer';
       const currency=order.market==='international'?'USD':'CAD';
       const settings=await loadPaymentSettings(db);
       if(method==='etransfer' && (!settings.etransfer_enabled||!settings.etransfer_email)) return reply({error:'Interac e-Transfer is not enabled in Payment methods'},409);
       if(method==='usdc_eth' && (!settings.usdc_eth_enabled||!isEthAddress(settings.usdc_eth_address))) return reply({error:'USDC on Ethereum is not enabled in Payment methods'},409);
+      if(method==='etransfer' && !resendConfig().configured) return reply({error:'Transactional email is not configured in Netlify. Add RESEND_API_KEY and RESEND_FROM_EMAIL before requesting e-Transfer payment.'},409);
       const netProduct=Math.max(0,Number(order.subtotal_cents||0)-Number(order.promo_discount_cents||0)-Number(order.referral_reward_discount_cents||0));
-      const minimumTotal=netProduct+Number(order.shipping_cents||0);
-      const requested=Number(body.amount_cents);
-      let amount;
-      if(order.market==='international') amount=minimumTotal;
-      else {
-        amount=Number.isInteger(requested)?requested:minimumTotal;
-        if(amount<minimumTotal||amount>100000000) return reply({error:'Payment amount cannot be below the approved order total including delivery'},400);
-      }
+      const amount=netProduct+Number(order.shipping_cents||0);
+      if(amount<=0||amount>100000000) return reply({error:'Payment amount is invalid'},400);
       const reference=String(order.order_number||order.id).slice(0,80);
-      const {data:updated,error:updateError}=await db.from('orders').update({payment_method:method,payment_status:'awaiting_payment',payment_amount_cents:amount,payment_currency:currency,payment_reference:reference,payment_requested_at:new Date().toISOString(),payment_tx_hash:null,paid_at:null}).eq('id',order.id).select('*').single();
+      const requestedAt=new Date().toISOString();
+      const {data:updated,error:updateError}=await db.from('orders').update({payment_method:method,payment_status:'awaiting_payment',payment_amount_cents:amount,payment_currency:currency,payment_reference:reference,payment_requested_at:requestedAt,payment_tx_hash:null,paid_at:null}).eq('id',order.id).select('*').single();
       if(updateError) throw updateError;
-      return reply({instructions:paymentInstructions(updated,settings)});
+      const instructions=paymentInstructions(updated,settings);
+      if(method==='etransfer'){
+        try{
+          const email=paymentRequestEmail(updated,instructions);
+          const sent=await sendResendEmail({...email,to:updated.customer_email,idempotencyKey:`payment-request-${updated.id}-${amount}`});
+          return reply({instructions,email_sent:true,email_id:sent?.id||null});
+        }catch(emailError){
+          console.error('Payment request email failed',updated.id,emailError?.message||'');
+          const {error:rollbackError}=await db.from('orders').update({payment_status:order.payment_status||'not_requested',payment_amount_cents:order.payment_amount_cents??null,payment_currency:order.payment_currency??null,payment_reference:order.payment_reference??null,payment_requested_at:order.payment_requested_at??null,payment_tx_hash:order.payment_tx_hash??null,paid_at:order.paid_at??null}).eq('id',order.id);
+          if(rollbackError) console.error('Payment request rollback failed',order.id,rollbackError.message||'');
+          return reply({error:rollbackError?'Payment email failed and the order state could not be rolled back automatically. Review this order before retrying.':'Payment email could not be sent. The order was returned to Not requested. Check the Resend API key and verified sender domain.'},502);
+        }
+      }
+      return reply({instructions,email_sent:false});
+    }
+    if(action==='resend-payment-email'){
+      const orderId=String(body.order_id||'');
+      const {data:order,error}=await db.from('orders').select('*').eq('id',orderId).maybeSingle();
+      if(error) throw error;
+      if(!order) return reply({error:'Order not found'},404);
+      if(order.status!=='approved'||order.payment_status!=='awaiting_payment'||order.payment_method!=='etransfer') return reply({error:'Only an approved e-Transfer order awaiting payment can resend payment instructions'},409);
+      const settings=await loadPaymentSettings(db);
+      const instructions=paymentInstructions(order,settings);
+      const email=paymentRequestEmail(order,instructions);
+      try{
+        const sent=await sendResendEmail({...email,to:order.customer_email});
+        return reply({ok:true,email_sent:true,email_id:sent?.id||null});
+      }catch(emailError){
+        console.error('Payment email resend failed',order.id,emailError?.message||'');
+        return reply({error:'Payment email could not be resent. Check the Resend configuration and sender domain.'},502);
+      }
     }
     if(action==='mark-payment-paid'){
       const orderId=String(body.order_id||'');
@@ -330,9 +410,21 @@ export default async request => {
       const reference=String(body.reference||'').trim().slice(0,160);
       const txHash=String(body.tx_hash||'').trim();
       if(order.payment_method==='usdc_eth'&&!isEthTxHash(txHash)) return reply({error:'Enter the verified Ethereum transaction hash'},400);
-      const {error:updateError}=await db.from('orders').update({payment_status:'paid',payment_reference:reference||order.payment_reference||order.order_number,payment_tx_hash:order.payment_method==='usdc_eth'?txHash:null,paid_at:new Date().toISOString()}).eq('id',order.id);
+      const paidAt=new Date().toISOString();
+      const paymentReference=reference||order.payment_reference||order.order_number;
+      const {data:updated,error:updateError}=await db.from('orders').update({payment_status:'paid',payment_reference:paymentReference,payment_tx_hash:order.payment_method==='usdc_eth'?txHash:null,paid_at:paidAt}).eq('id',order.id).select('*').single();
       if(updateError) throw updateError;
-      return reply({ok:true});
+      if(updated.payment_method==='etransfer'){
+        try{
+          const email=paymentReceivedEmail(updated);
+          const sent=await sendResendEmail({...email,to:updated.customer_email,idempotencyKey:`payment-paid-${updated.id}`});
+          return reply({ok:true,email_sent:true,email_id:sent?.id||null});
+        }catch(emailError){
+          console.error('Payment received email failed',updated.id,emailError?.message||'');
+          return reply({ok:true,email_sent:false,warning:'Payment was marked paid, but the confirmation email could not be sent. Check Resend before contacting the customer.'});
+        }
+      }
+      return reply({ok:true,email_sent:false});
     }
     return reply({error:'Unknown action'},404);
   } catch(e) {
